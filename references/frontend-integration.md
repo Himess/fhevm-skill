@@ -550,6 +550,23 @@ try {
 }
 ```
 
+## TypeScript: window.ethereum Declaration
+
+For TypeScript strict mode, declare `window.ethereum` globally:
+
+```typescript
+// src/global.d.ts (or any .d.ts file in your project)
+import { Eip1193Provider } from "ethers";
+
+declare global {
+    interface Window {
+        ethereum?: Eip1193Provider;
+    }
+}
+```
+
+Without this, `window.ethereum` will show a TypeScript error in strict mode.
+
 ## Bundler WASM Configuration
 
 The Relayer SDK uses WASM internally. Some bundlers need configuration:

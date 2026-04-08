@@ -8,15 +8,26 @@ import { ethers } from "ethers";
 
 // ERC-7984 ABI (externalEuint64 = bytes32 in ABI, euint64 return = uint256)
 const TOKEN_ABI = [
+  // ERC-7984 standard
   "function confidentialTransfer(address to, bytes32 encAmount, bytes proof) returns (uint256)",
+  "function confidentialTransferFrom(address from, address to, bytes32 encAmount, bytes proof) returns (uint256)",
   "function confidentialBalanceOf(address account) view returns (uint256)",
   "function setOperator(address operator, uint48 until)",
   "function isOperator(address holder, address spender) view returns (bool)",
-  "function mint(address to, uint64 amount)",
   "function name() view returns (string)",
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
+  // Owner functions
+  "function mint(address to, uint64 amount)",
+  "function owner() view returns (address)",
+  // Wrap/Unwrap (if ERC7984ERC20Wrapper)
+  "function wrap(address to, uint256 amount)",
+  "function unwrap(address from, address to, uint64 amount)",
+  "function underlying() view returns (address)",
 ];
+
+// For window.ethereum TypeScript support, add to your project's global.d.ts:
+// declare global { interface Window { ethereum?: import("ethers").Eip1193Provider; } }
 
 const TOKEN_ADDRESS = "0x..."; // Your deployed token address
 

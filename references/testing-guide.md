@@ -331,6 +331,31 @@ const value = result.clearValues[handleAsHexString]; // bigint
 
 **Do NOT pass empty proof `"0x"`** — the KMSVerifier rejects empty proofs even in mock mode. Always use the proof from `fhevm.publicDecrypt()`.
 
+### Testing finalizeUnwrap (Async 2-Step Unwrap)
+
+```typescript
+it("should unwrap and finalize", async function () {
+    // Step 1: Request unwrap (burns encrypted tokens, requests decryption)
+    const unwrapEnc = await fhevm.createEncryptedInput(tokenAddress, owner.address).add64(500).encrypt();
+    const unwrapTx = await token.connect(owner)["unwrap(address,address,bytes32,bytes)"](
+        owner.address, owner.address, unwrapEnc.handles[0], unwrapEnc.inputProof,
+    );
+    const receipt = await unwrapTx.wait();
+    // Extract requestId from UnwrapRequested event
+    const requestId = receipt.logs[...]; // Parse event for requestId
+
+    // Step 2: In mock mode, get cleartext + proof via publicDecrypt
+    // NOTE: The unwrap internally calls makePubliclyDecryptable on the burn handle
+    // You need the burn handle from the event, then:
+    // const decrypted = await fhevm.publicDecrypt([burnHandle]);
+    // await token.finalizeUnwrap(requestId, decrypted.abiEncodedClearValues, decrypted.decryptionProof);
+
+    // In practice, finalizeUnwrap testing in mock mode is complex because
+    // the burn handle is internal to the wrapper. A simpler approach:
+    // test wrap + encrypted transfer + balance verification instead.
+});
+```
+
 ### Mock Mode: Timestamp Behavior
 
 In mock mode, `block.timestamp` may drift from `Date.now() / 1000` by several seconds. If you get timestamp collisions (two blocks with same timestamp), add to hardhat config:
