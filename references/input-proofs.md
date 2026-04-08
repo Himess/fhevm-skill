@@ -123,6 +123,31 @@ function placeBid(externalEuint64 encBid, bytes calldata proof) external {
 }
 ```
 
+### Batch Encrypted Operations (Multiple Users/Items)
+
+For operations involving multiple encrypted values in a loop (e.g., batch voter registration, batch payroll):
+
+```solidity
+// Batch registration with individual encrypted inputs
+function registerVoters(
+    address[] calldata voters,
+    externalEuint64[] calldata encWeights,
+    bytes calldata inputProof           // Single proof for ALL inputs
+) external onlyOwner {
+    require(voters.length == encWeights.length, "Length mismatch");
+    require(voters.length <= 10, "Batch too large");  // Bound FHE ops per tx
+
+    for (uint i = 0; i < voters.length; i++) {
+        euint64 weight = FHE.fromExternal(encWeights[i], inputProof);
+        _weights[voters[i]] = weight;
+        FHE.allowThis(_weights[voters[i]]);
+        FHE.allow(_weights[voters[i]], voters[i]);
+    }
+}
+```
+
+**Gas limit**: Each FHE operation in a loop costs gas. Rule of thumb: max **10-15 FHE operations per transaction** for euint64. Larger batches should be split across multiple transactions.
+
 ## Client-Side: Creating Encrypted Inputs
 
 ### Using the Relayer SDK

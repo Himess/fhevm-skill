@@ -120,6 +120,7 @@ If you just generated code containing any of these, STOP and fix:
 | `FHE.safeAdd()` / `safeSub()` | Don't exist. All arithmetic wraps silently |
 | `npm install hardhat` (gets v3) | Use `npm install hardhat@^2.22.0` — FHEVM plugin requires Hardhat 2 |
 | `npm install hardhat-deploy` (gets v2) | Use `hardhat-deploy@^0.11.45` — v2 is incompatible with Hardhat 2 |
+| `npm install @nomicfoundation/hardhat-ethers` (gets v4) | Use `@nomicfoundation/hardhat-ethers@^3.1.3` — v4 requires Hardhat 3 |
 | `abi.decode(cleartexts, (uint64))` | SDK encodes as `uint256`: use `abi.decode(cleartexts, (uint256))` then cast |
 | `FHE.randEuint64(100)` | upperBound must be power of 2: `FHE.randEuint64(128)` then `FHE.rem(r, 100)` |
 

@@ -313,7 +313,15 @@ await contract.revealResults(result.abiEncodedClearValues, result.decryptionProo
 
 **Important**: `publicDecrypt` only works for handles that have been marked as `makePubliclyDecryptable` on-chain. If the handle hasn't been marked, the KMS will reject the request.
 
-**Hardhat tests vs Browser**: In Hardhat tests, use `fhevm.publicDecrypt(handles)` from the test runner. In browser, use the Relayer SDK's `fhevm.publicDecrypt(handles)` as shown above. The API is similar but the import source differs (`hardhat` vs `@zama-fhe/relayer-sdk/web`).
+### publicDecrypt: Hardhat Test vs Browser SDK
+
+| Context | Import | Usage |
+|---------|--------|-------|
+| Hardhat test | `import { fhevm } from "hardhat"` | `await fhevm.publicDecrypt(handles)` |
+| Browser (React) | `import { createInstance } from "@zama-fhe/relayer-sdk/web"` | `await fhevm.publicDecrypt(handles)` |
+| Node.js script | `import { createInstance } from "@zama-fhe/relayer-sdk/node"` | `await fhevm.publicDecrypt(handles)` |
+
+The API is identical — `publicDecrypt(handles)` returns `{ clearValues, abiEncodedClearValues, decryptionProof }` in all contexts. Only the import source differs. In Hardhat tests, `fhevm` is auto-injected by the plugin. In browser/Node.js, you must create an instance first via `createInstance()`.
 
 ## React Integration Pattern
 
@@ -566,12 +574,29 @@ export default defineConfig({
 
 ### Webpack (next.config.js for Next.js)
 ```javascript
-module.exports = {
-    webpack: (config) => {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+    webpack: (config, { isServer }) => {
+        // Enable WASM support
         config.experiments = { ...config.experiments, asyncWebAssembly: true };
+        // Prevent WASM from being bundled on server side
+        if (isServer) {
+            config.externals = [...(config.externals || []), "@zama-fhe/relayer-sdk"];
+        }
         return config;
     },
+    // Suppress hydration warnings from WASM-dependent components
+    reactStrictMode: true,
 };
+module.exports = nextConfig;
+```
+
+**Also in Next.js**: Any component using `@zama-fhe/relayer-sdk/web` must be dynamically imported:
+```typescript
+// pages/index.tsx or app/page.tsx
+import dynamic from "next/dynamic";
+const FhevmDashboard = dynamic(() => import("../components/Dashboard"), { ssr: false });
+export default function Home() { return <FhevmDashboard />; }
 ```
 
 If you see `WebAssembly.instantiate` errors, ensure your bundler supports WASM and the SDK is not being pre-bundled/optimized.

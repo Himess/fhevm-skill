@@ -358,6 +358,38 @@ await ethers.provider.send("evm_increaseTime", [86400]); // +1 day
 await ethers.provider.send("evm_mine", []);
 ```
 
+### Testing Time-Based Contracts (Voting, Vesting, Auction)
+
+Use Hardhat's time manipulation for deterministic time-based tests:
+
+```typescript
+// Advance time by 1 day
+await ethers.provider.send("evm_increaseTime", [86400]);
+await ethers.provider.send("evm_mine", []);
+
+// Set to specific timestamp
+await ethers.provider.send("evm_setNextBlockTimestamp", [futureTimestamp]);
+await ethers.provider.send("evm_mine", []);
+
+// Get current block timestamp
+const block = await ethers.provider.getBlock("latest");
+const now = block!.timestamp;
+```
+
+**Pattern for voting/auction with start/end times:**
+```typescript
+it("should reject vote after deadline", async function () {
+    // Fast-forward past the voting deadline
+    await ethers.provider.send("evm_increaseTime", [3601]); // 1 hour + 1 second
+    await ethers.provider.send("evm_mine", []);
+
+    // Vote should now fail
+    let reverted = false;
+    try { await vote(alice, true); } catch { reverted = true; }
+    expect(reverted).to.be.true;
+});
+```
+
 ### Mock Mode: Random Number Behavior
 
 In mock mode, `FHE.randEuint64()` and other random functions produce **deterministic pseudo-random values** based on an internal counter — NOT cryptographically random. This means:
