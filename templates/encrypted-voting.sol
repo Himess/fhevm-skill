@@ -113,7 +113,7 @@ contract EncryptedVoting is ZamaEthereumConfig, Ownable2Step {
         revealedNo = uint64(noRaw);
         state = VotingState.Revealed;
 
-        emit ResultRevealed(yes, no);
+        emit ResultRevealed(revealedYes, revealedNo);
     }
 
     // ─── View ───────────────────────────────────────────────────────────

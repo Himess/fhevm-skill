@@ -33,6 +33,7 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       chainId: 31337,
+      allowBlocksWithSameTimestamp: true, // Prevents timestamp collision in time-based tests
     },
     sepolia: {
       url: INFURA_API_KEY
