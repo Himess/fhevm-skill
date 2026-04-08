@@ -63,6 +63,12 @@
 - [ ] Hardhat config has `evmVersion: "cancun"` (required for transient storage)
 - [ ] Solidity version is `^0.8.24` or higher
 
+### Cross-Contract & Escrow Security
+
+- [ ] `ReentrancyGuard` on ALL functions that call external ERC-7984 tokens (deposit, withdraw, release, refund, claim)
+- [ ] Escrow/vault contracts: state changes BEFORE external token calls (CEI pattern)
+- [ ] Token operator permissions: document that users must call `setOperator` before interacting
+
 ### Protocol-Level Security
 
 - [ ] `Ownable2Step` used instead of `Ownable` (prevents accidental ownership transfer)
