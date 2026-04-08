@@ -203,6 +203,21 @@ If the callback returns `false` (encrypted), the token contract attempts to refu
 
 Use `ERC7984ERC20Wrapper` extension:
 
+**Override tip**: When extending `ERC7984ERC20Wrapper`, use `override(ERC7984ERC20Wrapper)` — NOT `override(ERC7984, ERC7984ERC20Wrapper)`. The wrapper already overrides the base:
+
+```solidity
+// Required overrides when extending ERC7984ERC20Wrapper:
+function decimals() public view override(ERC7984ERC20Wrapper) returns (uint8) {
+    return ERC7984ERC20Wrapper.decimals();
+}
+function supportsInterface(bytes4 id) public view override(ERC7984ERC20Wrapper) returns (bool) {
+    return ERC7984ERC20Wrapper.supportsInterface(id);
+}
+function _update(address from, address to, euint64 amount) internal override(ERC7984ERC20Wrapper) returns (euint64) {
+    return ERC7984ERC20Wrapper._update(from, to, amount);
+}
+```
+
 ```solidity
 import {ERC7984ERC20Wrapper} from "@openzeppelin/confidential-contracts/token/ERC7984/extensions/ERC7984ERC20Wrapper.sol";
 
