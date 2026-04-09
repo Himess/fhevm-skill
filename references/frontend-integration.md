@@ -277,8 +277,8 @@ const keypair = fhevm.generateKeypair();
 
 // Create EIP-712 signature request
 const contractAddresses = [contractAddress];
-const startTimestamp = Math.floor(Date.now() / 1000).toString();
-const durationDays = '10';
+const startTimestamp = Math.floor(Date.now() / 1000);  // NUMBER, not string
+const durationDays = 10;  // NUMBER, not string
 
 const eip712 = fhevm.createEIP712(
     keypair.publicKey,
@@ -377,7 +377,7 @@ function useConfidentialBalance(contractAddress: string) {
 
             // Generate keypair and sign
             const keypair = fhevm.generateKeypair();
-            const startTimestamp = Math.floor(Date.now() / 1000).toString();
+            const startTimestamp = Math.floor(Date.now() / 1000);
             const eip712 = fhevm.createEIP712(
                 keypair.publicKey,
                 [contractAddress],
@@ -399,10 +399,12 @@ function useConfidentialBalance(contractAddress: string) {
                 [contractAddress],
                 await signer.getAddress(),
                 startTimestamp,
-                '10',
+                10,
             );
 
-            setBalance(result[encHandle]);
+            // encHandle is a bigint — convert to 32-byte hex for lookup
+            const hexHandle = ethers.toBeHex(encHandle, 32);
+            setBalance(result[hexHandle]);
         } finally {
             setLoading(false);
         }
@@ -682,11 +684,23 @@ await ensureSepoliaNetwork(window.ethereum);
 const fhevm = await createInstance({ ...SepoliaConfig, network: window.ethereum });
 ```
 
-## Sepolia Contract Addresses
+## Contract Addresses
 
+### Sepolia Testnet (chainId 11155111, gatewayChainId 10901)
 ```
 ACL:            0xf0Ffdc93b7E186bC2f8CB3dAA75D86d1930A433D
 Coprocessor:    0x92C920834Ec8941d2C77D188936E1f7A6f49c127
 KMSVerifier:    0xbE0E383937d564D7FF0BC3b46c51f0bF8d5C311A
 InputVerifier:  0xBBC1fFCdc7C316aAAd72E807D9b0272BE8F84DA0
+relayerUrl:     https://relayer.testnet.zama.org
 ```
+
+### Ethereum Mainnet (chainId 1, gatewayChainId 261131)
+```
+ACL:            0xcA2E8f1F656CD25C01F05d0b243Ab1ecd4a8ffb6
+KMSVerifier:    0x77627828a55156b04Ac0DC0eb30467f1a552BB03
+InputVerifier:  0xCe0FC2e05CFff1B719EFF7169f7D80Af770c8EA2
+relayerUrl:     https://relayer.mainnet.zama.org
+```
+
+Use `MainnetConfig` from the Relayer SDK for mainnet — addresses are hardcoded in the SDK.

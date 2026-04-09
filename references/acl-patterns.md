@@ -215,9 +215,17 @@ function vote(uint256 proposalId, externalEbool encVote, externalEuint64 encWeig
 
 ## User Decryption Delegation
 
-For account abstraction or backend services that need to decrypt on behalf of a user:
+For account abstraction or backend services that need to decrypt on behalf of a user.
 
-### On-Chain Setup (by the data owner)
+**Delegation constraints (FHE.sol v0.11.1)**: All `delegateUserDecryption*` functions have these requirements:
+- `expirationDate` must be at least **1 hour in the future** (`expirationDate >= block.timestamp + 1 hours`)
+- Cannot delegate OR revoke more than once per block for the same `(delegator, delegate, contractAddress)` tuple
+- `contractAddress` cannot equal `address(this)` (the delegator)
+- `delegate` cannot equal `address(this)` (the delegator)
+- `delegate` cannot equal `contractAddress`
+- The delegator is `address(this)` — the **contract** calling delegateUserDecryption, not a user directly
+
+### On-Chain Setup (called by the contract holding the encrypted data)
 
 ```solidity
 // Grant a delegate permission to decrypt, with expiration

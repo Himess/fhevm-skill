@@ -233,18 +233,17 @@ contract WrappedToken is ZamaEthereumConfig, ERC7984ERC20Wrapper, Ownable2Step {
 ### ERC7984ERC20Wrapper Function Signatures
 
 ```solidity
-// Wrap: locks ERC-20, mints encrypted ERC-7984 tokens
-function wrap(address to, uint256 amount) external;
+// Wrap: locks ERC-20, mints encrypted ERC-7984 tokens — returns the minted encrypted amount
+function wrap(address to, uint256 amount) public virtual returns (euint64);
 // User must first: underlying.approve(wrapperAddress, amount)
 
-// Unwrap (3 overloads):
-function unwrap(address from, address to, uint64 amount) external;
-function unwrap(address from, address to, externalEuint64 encAmount, bytes calldata proof) external;
-function unwrap(address from, address to, euint64 amount) external;
+// Unwrap (2 overloads) — returns the unwrap request ID (bytes32)
+function unwrap(address from, address to, euint64 amount) public virtual returns (bytes32);
+function unwrap(address from, address to, externalEuint64 encryptedAmount, bytes calldata inputProof) public virtual returns (bytes32);
 // Burns encrypted tokens, calls makePubliclyDecryptable, stores unwrap request
 
-// Finalize: anyone can call after KMS decrypts
-function finalizeUnwrap(uint256 requestId, uint64 cleartextAmount, bytes calldata decryptionProof) external;
+// Finalize: anyone can call after KMS decrypts. Note: requestId is bytes32, NOT uint256.
+function finalizeUnwrap(bytes32 unwrapRequestId, uint64 unwrapAmountCleartext, bytes calldata decryptionProof) public virtual;
 // Verifies proof via checkSignatures, transfers plaintext ERC-20 to recipient
 
 // View:
@@ -326,6 +325,32 @@ token.discloseEncryptedAmount(encryptedAmount, cleartextAmount, decryptionProof)
 
 All extensions are at: `@openzeppelin/confidential-contracts/token/ERC7984/extensions/`
 
+### Other @openzeppelin/confidential-contracts Modules
+
+Beyond ERC-7984 extensions, the package includes:
+
+```solidity
+// Finance
+import {VestingWalletConfidential} from "@openzeppelin/confidential-contracts/finance/VestingWalletConfidential.sol";
+import {VestingWalletCliffConfidential} from "@openzeppelin/confidential-contracts/finance/VestingWalletCliffConfidential.sol";
+import {VestingWalletConfidentialFactory} from "@openzeppelin/confidential-contracts/finance/VestingWalletConfidentialFactory.sol";
+import {BatcherConfidential} from "@openzeppelin/confidential-contracts/finance/BatcherConfidential.sol";
+
+// Governance base (used by ERC7984Votes)
+import {VotesConfidential} from "@openzeppelin/confidential-contracts/governance/utils/VotesConfidential.sol";
+
+// Utilities
+import {HandleAccessManager} from "@openzeppelin/confidential-contracts/utils/HandleAccessManager.sol";
+import {CheckpointsConfidential} from "@openzeppelin/confidential-contracts/utils/structs/CheckpointsConfidential.sol";
+import {ERC7984Utils} from "@openzeppelin/confidential-contracts/token/ERC7984/utils/ERC7984Utils.sol";
+```
+
+**VestingWalletConfidential**: Drop-in confidential vesting wallet with encrypted amounts. No need to write custom vesting logic.
+
+**HandleAccessManager**: Helper for managing ACL permissions across multiple contracts.
+
+**BatcherConfidential**: Batch multiple confidential operations into one transaction.
+
 ### ERC7984Votes — Governance Token Extension
 
 For DAO/governance use cases, extend `ERC7984Votes` to enable encrypted vote delegation:
@@ -349,7 +374,7 @@ contract GovernanceToken is ZamaEthereumConfig, ERC7984, ERC7984Votes, Ownable2S
     // ERC7984Votes provides:
     // - delegate(address delegatee) — delegate votes
     // - getVotes(address account) — encrypted vote weight
-    // - getPastVotes(address account, uint256 blockNumber) — historical snapshots
+    // - getPastVotes(address account, uint256 timepoint) — historical snapshots (ERC-6372 clock)
 }
 ```
 

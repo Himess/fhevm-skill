@@ -33,8 +33,8 @@ const keypair = fhevm.generateKeypair();
 
 // 4. Create EIP-712 typed data for signing
 const contractAddresses = [contractAddress];
-const startTimestamp = Math.floor(Date.now() / 1000).toString();
-const durationDays = '10';  // How long the decryption permission lasts
+const startTimestamp = Math.floor(Date.now() / 1000);  // NUMBER, not string
+const durationDays = 10;  // NUMBER, not string — how long the decryption permission lasts
 
 const eip712 = fhevm.createEIP712(
     keypair.publicKey,
@@ -63,7 +63,9 @@ const result = await fhevm.userDecrypt(
 );
 
 // 7. Read the decrypted value
-const clearBalance = result[encryptedBalance];  // bigint
+// IMPORTANT: encryptedBalance from ethers is a bigint — convert to 32-byte hex for lookup
+const hexHandle = ethers.toBeHex(encryptedBalance, 32);
+const clearBalance = result[hexHandle];  // bigint
 console.log("Balance:", clearBalance.toString());
 ```
 
@@ -203,9 +205,11 @@ FHE.delegateUserDecryption(
 
 ```typescript
 // Delegate creates EIP-712 for delegated decryption
+// NOTE: delegatorAddress is the 3rd parameter (the original data owner)
 const eip712 = fhevm.createDelegatedUserDecryptEIP712(
     keypair.publicKey,
     contractAddresses,
+    delegatorAddress,      // The original data owner whose data is being decrypted
     startTimestamp,
     durationDays,
 );
@@ -238,36 +242,42 @@ A common pattern for converting confidential tokens back to standard tokens:
 ### Contract Side
 
 ```solidity
-mapping(euint64 => address) private _unwrapRecipients;
+// Map request ID (bytes32) to recipient — NOT euint64 as key (user-defined types can't be mapping keys)
+mapping(bytes32 requestId => address recipient) private _unwrapRecipients;
+mapping(bytes32 requestId => euint64 burntHandle) private _unwrapHandles;
 
-function _unwrap(address from, address to, euint64 amount) internal {
+function _unwrap(address from, address to, euint64 amount) internal returns (bytes32 requestId) {
     // 1. Burn the confidential tokens
     euint64 burntAmount = _burn(from, amount);
 
     // 2. Request public decryption of the burnt amount
     FHE.makePubliclyDecryptable(burntAmount);
 
-    // 3. Store who should receive the unwrapped tokens
-    _unwrapRecipients[burntAmount] = to;
-    emit UnwrapRequested(to, burntAmount);
+    // 3. Generate a request ID and store recipient + handle
+    requestId = keccak256(abi.encode(from, to, FHE.toBytes32(burntAmount), block.number));
+    _unwrapRecipients[requestId] = to;
+    _unwrapHandles[requestId] = burntAmount;
+    emit UnwrapRequested(requestId, to, FHE.toBytes32(burntAmount));
 }
 
 function finalizeUnwrap(
-    euint64 burntAmount,
-    uint64 clearAmount,
+    bytes32 unwrapRequestId,
+    uint64 unwrapAmountCleartext,
     bytes calldata decryptionProof
 ) external {
-    address to = _unwrapRecipients[burntAmount];
+    address to = _unwrapRecipients[unwrapRequestId];
     require(to != address(0), "No pending unwrap");
-    delete _unwrapRecipients[burntAmount];
+    euint64 burntAmount = _unwrapHandles[unwrapRequestId];
+    delete _unwrapRecipients[unwrapRequestId];
+    delete _unwrapHandles[unwrapRequestId];
 
     // Verify the decryption proof
     bytes32[] memory handles = new bytes32[](1);
     handles[0] = FHE.toBytes32(burntAmount);
-    FHE.checkSignatures(handles, abi.encode(clearAmount), decryptionProof);
+    FHE.checkSignatures(handles, abi.encode(unwrapAmountCleartext), decryptionProof);
 
     // Transfer the plaintext amount
-    IERC20(underlying).safeTransfer(to, uint256(clearAmount));
+    IERC20(underlying).safeTransfer(to, uint256(unwrapAmountCleartext));
 }
 ```
 

@@ -63,12 +63,12 @@ export default function ConfidentialTokenDashboard() {
 
       // EIP-712 user decryption flow
       const keypair = fhevm.generateKeypair();
-      const startTimestamp = Math.floor(Date.now() / 1000).toString();
+      const startTimestamp = Math.floor(Date.now() / 1000);
       const eip712 = fhevm.createEIP712(
         keypair.publicKey,
         [TOKEN_ADDRESS],
         startTimestamp,
-        "10",
+        10,
       );
       const signature = await signer.signTypedData(
         eip712.domain,
@@ -83,9 +83,11 @@ export default function ConfidentialTokenDashboard() {
         [TOKEN_ADDRESS],
         address,
         startTimestamp,
-        "10",
+        10,
       );
-      setBalance(result[encHandle]?.toString() ?? "0");
+      // encHandle from contract is a bigint — convert to 32-byte hex for lookup
+      const hexHandle = ethers.toBeHex(encHandle, 32);
+      setBalance(result[hexHandle]?.toString() ?? "0");
       setStatus("Decrypted");
     } catch (err: any) {
       setStatus(`Decrypt failed: ${err.message}`);

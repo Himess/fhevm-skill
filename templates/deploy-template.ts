@@ -27,4 +27,5 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 };
 
 export default func;
+func.id = "deploy_myContract"; // Unique ID prevents re-execution on subsequent runs
 func.tags = ["MyContract"];

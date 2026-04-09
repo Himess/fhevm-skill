@@ -560,6 +560,33 @@ async function main() {
 main().catch(console.error);
 ```
 
+## Hardhat Plugin Helper APIs
+
+Beyond `createEncryptedInput` and `userDecryptEuint`, the `@fhevm/hardhat-plugin` provides several helpers:
+
+```typescript
+// Simpler single-value encryption (no builder chain)
+const enc = await fhevm.encryptUint(FhevmType.euint64, 1000n, contractAddress, signer.address);
+const encBool = await fhevm.encryptBool(true, contractAddress, signer.address);
+const encAddr = await fhevm.encryptAddress("0x...", contractAddress, signer.address);
+// Returns: { externalEuint: Uint8Array, inputProof: Uint8Array }
+
+// Public decryption (test mode)
+const clearVal = await fhevm.publicDecryptEuint(FhevmType.euint64, handle);
+const clearBool = await fhevm.publicDecryptEbool(handle);
+const clearAddr = await fhevm.publicDecryptEaddress(handle);
+
+// Gas / debugging helpers
+const hcu = await fhevm.computeTransactionHCU(receipt);  // Homomorphic Computation Units used
+const events = fhevm.parseCoprocessorEvents(receipt.logs);  // Parse FHE events from tx
+
+// Test assertion helpers
+await fhevm.assertCoprocessorInitialized(contract);  // Verify contract is set up
+const matcher = fhevm.revertedWithCustomErrorArgs("ERC7984", "ERC7984UnauthorizedSpender");
+```
+
+These helpers simplify common test patterns and provide better error messages.
+
 ## Running Tests
 
 ```bash

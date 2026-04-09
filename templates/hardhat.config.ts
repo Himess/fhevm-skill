@@ -28,6 +28,9 @@ const config: HardhatUserConfig = {
       },
       viaIR: true,          // Required for complex FHE contracts (avoids stack-too-deep)
       evmVersion: "cancun", // REQUIRED: EIP-1153 transient storage for FHE.allowTransient()
+      metadata: {
+        bytecodeHash: "none", // Deterministic builds for Etherscan verification
+      },
     },
   },
   networks: {
