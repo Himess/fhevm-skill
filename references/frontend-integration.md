@@ -78,6 +78,34 @@ const fhevm = await createInstance({
 </script>
 ```
 
+## CRITICAL: Handle Types Differ Between /web and /node
+
+The Relayer SDK returns encrypted handles in different types depending on the subpath:
+
+| Subpath | `encrypted.handles[0]` type | Example value |
+|---------|----------------------------|---------------|
+| `/web` (browser) | hex string | `"0x1a2b3c..."` |
+| `/node` (Node.js) | BigInt | `123456789n` |
+
+**Always normalize handles before using them:**
+
+```typescript
+// Works in BOTH /web and /node:
+const handleAsHex = typeof encrypted.handles[0] === "string"
+    ? encrypted.handles[0]
+    : `0x${encrypted.handles[0].toString(16).padStart(64, "0")}`;
+
+// For passing to contracts, ethers.js accepts both string and BigInt.
+// But if you need a string (e.g., for lookup in decrypt results):
+const handleKey = String(encrypted.handles[0]);
+
+// When using result.clearValues[handle]:
+const value = result.clearValues[String(encrypted.handles[0])];
+// NOT: result.clearValues[encrypted.handles[0]] — fails in /node!
+```
+
+**Common error**: `encrypted.handles[0].substring()` crashes in /node because BigInt has no `.substring()`. Always use `String(...)` first or check the type.
+
 ## ABI Encoding of Encrypted Types
 
 When calling FHEVM contracts from JavaScript/TypeScript, encrypted types map to these ABI types:
