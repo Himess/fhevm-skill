@@ -62,7 +62,7 @@ Ten production-ready Solidity contracts plus matching tests + two React dashboar
 
 ### Reference guides
 
-`type-system.md` · `acl-patterns.md` · `input-proofs.md` · `decryption-guide.md` · `erc7984-guide.md` · `testing-guide.md` · `frontend-integration.md` · `sdk-v3-guide.md` · `react-sdk-guide.md` · `common-pitfalls.md` · `gas-optimization.md` · `security-checklist.md` · `zama-upstream.md`
+`type-system.md` · `acl-patterns.md` · `input-proofs.md` · `decryption-guide.md` · `erc7984-guide.md` · `testing-guide.md` · `frontend-integration.md` · `sdk-v3-guide.md` · `react-sdk-guide.md` · `common-pitfalls.md` · `gas-optimization.md` · `security-checklist.md` · `zama-upstream.md` · `foundry-vs-hardhat.md`
 
 ---
 

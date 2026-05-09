@@ -284,7 +284,29 @@ method to call.
 
 ---
 
-## 7. `RelayerWeb` / `RelayerNode`
+## 7. `RelayerWeb` / `RelayerNode` / `RelayerCleartext`
+
+There are three relayer transports — pick by where the dApp is running. The **same `ZamaSDK` API** works against all three; only the relayer instance you pass at construction time changes.
+
+| Relayer | Where it runs | What it talks to | Use it for |
+|---|---|---|---|
+| `RelayerWeb` | Browser | Zama relayer HTTP API + KMS | **Sepolia (and Mainnet) production frontends** |
+| `RelayerNode` | Node.js | Zama relayer HTTP API + KMS | Backend services, Sepolia E2E test scripts |
+| `RelayerCleartext` | Browser **or** Node.js | Local cleartext FHE host (no KMS) | **Local-only dev** against `anvil` / Hardhat node — no network calls, instant decrypts |
+
+> **`RelayerCleartext`**: when you're iterating locally against `anvil` (Foundry) or `npx hardhat node`, the production KMS isn't reachable. `RelayerCleartext` returns plaintext directly without any signature roundtrip — useful for fast UI development. **DO NOT ship a build that uses `RelayerCleartext` to Sepolia or Mainnet** — the SDK would silently bypass real encryption. Pick the relayer at the provider level (e.g. by reading `process.env.NEXT_PUBLIC_NETWORK` or `chainId`):
+>
+> ```ts
+> import { RelayerWeb, RelayerCleartext } from "@zama-fhe/sdk";
+>
+> const relayer = chainId === 11155111
+>   ? new RelayerWeb({ getChainId: async () => 11155111, transports: { ... } })
+>   : new RelayerCleartext();    // localhost dev only
+> ```
+>
+> The official `zama-ai/fhevm-react-template` ships exactly this pattern, with `RelayerCleartext` for `localhost` and `RelayerWeb` for `sepolia`.
+
+### `RelayerWeb` setup
 
 Thin transport over the Zama relayer HTTP API. Pass per-chain config:
 

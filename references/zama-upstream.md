@@ -81,6 +81,29 @@ OpenZeppelin sometimes restructures package layouts at major version bumps. If `
 
 ---
 
+## Pre-deployed Sepolia confidential tokens (use these for testing)
+
+Zama ships a registry of canonical confidential ERC-7984 wrappers on Sepolia. **Use these instead of deploying your own MockUSDC** when you want a realistic integration test — they're recognised by the explorer, the wrappers registry, and any third-party tooling that integrates with the Zama ecosystem. Source: [docs.zama.org/protocol/protocol-apps/addresses/testnet/sepolia](https://docs.zama.org/protocol/protocol-apps/addresses/testnet/sepolia).
+
+| Token | Symbol | Sepolia address | Underlying decimals |
+|---|---|---|---|
+| Confidential USDC | `cUSDCMock` | `0x7c5BF43B851c1dff1a4feE8dB225b87f2C223639` | 6 |
+| Confidential USDT | `cUSDTMock` | `0x4E7B06D78965594eB5EF5414c357ca21E1554491` | 6 |
+| Confidential WETH | `cWETHMock` | `0x46208622DA27d91db4f0393733C8BA082ed83158` | 18 |
+| Confidential BRON | `cBRONMock` | `0xaa5612FA27c927a0c7961f5AEFEE5ba3A0F9C891` | 18 |
+| Confidential ZAMA | `cZAMAMock` | `0xf2D628d2598aF4eAF94CB76a437Ff86CA78FfbFB` | 18 |
+| Confidential tGBP | `ctGBPMock` | `0xfCE5c7069c5525eF6c8C2b2E35A745bA20a2F7CC` | 6 |
+| Confidential XAUt | `cXAUtMock` | `0xe4FcF848739845BC81Dee1d5352cf3844F0a60C7` | 6 |
+| Wrappers Registry | — | `0x2f0750Bbb0A246059d80e94c454586a7F27a128e` | — |
+
+> **Why use these instead of `templates/mock-erc20.sol` + your own wrapper?**
+> - Already deployed — no extra tx, no extra deploy fee
+> - Match the wrap-rate logic the official wrapper enforces (`_rate = 10**(underlyingDec - 6)`); see `references/erc7984-guide.md` for the rate-scaling pitfall
+> - Recognised by `docs.zama.org`, etherscan integrations, and the Wrappers Registry — easier for anyone reviewing your dApp on-chain
+> - Funded with mock supply by Zama; you can `mint()` for testing without setting up your own faucet
+>
+> **Use `templates/mock-erc20.sol` only when:** you need a custom decimal layout, you're testing a wrap/unwrap edge case the official mocks don't expose (e.g. underlying decimals < 6), or you're running locally on Hardhat / forge-fhevm where these addresses don't exist.
+
 ## Upgrade procedure (if Zama ships a breaking version)
 
 1. Check the relayer-sdk and `@fhevm/solidity` changelogs for ABI / handle / ACL contract changes
