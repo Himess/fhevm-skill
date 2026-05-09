@@ -38,6 +38,20 @@
 // `ethers.JsonRpcProvider` + `ethers.Wallet`. We still load the contract
 // ABI via `hre.artifacts.readArtifactSync(...)` so you keep the type-safe
 // compile pipeline. Inside `npx hardhat test`, prefer the `fhevm` helper.
+//
+// ─── SEPOLIA-PACING ─────────────────────────────────────────────────
+// On Sepolia, the FHE coprocessor's view of newly-created handles can
+// lag the host chain by a block or two. Sending two FHE-state-mutating
+// txs back-to-back from the same wallet (e.g. mint cTokenA then mint
+// cTokenB on the same deployer) sometimes reverts the second with a
+// stale-state error like `ERC7984ZeroBalance(...)` — even though the
+// first tx succeeded and `eth_call` at the prior block confirmed the
+// state. Mock-mode is unaffected.
+//
+// Workaround: leave 4-8 seconds between FHE-state-mutating txs (mints,
+// transfers, deposits, swaps). The `waitForTx` helper below pauses
+// `SEPOLIA_PACE_MS` after each successful FHE tx — set to 0 if your
+// flow doesn't include back-to-back mutations.
 
 import { ethers } from "ethers"; // raw ethers, NOT `from "hardhat"`
 import hre from "hardhat";
@@ -71,13 +85,22 @@ function etherscan(hashOrAddr: string, type: "tx" | "address" = "tx") {
   return `https://sepolia.etherscan.io/${type}/${hashOrAddr}`;
 }
 
-async function waitForTx(tx: any, label: string) {
+// Pace between FHE-state-mutating txs on Sepolia. 0 disables. Set to 6000
+// (6 seconds) if you're submitting back-to-back mints/transfers/swaps on
+// the same wallet — see SEPOLIA-PACING note at top.
+const SEPOLIA_PACE_MS = Number(process.env.SEPOLIA_PACE_MS ?? "6000");
+
+async function waitForTx(tx: any, label: string, fheMutating: boolean = true) {
   console.log(`  → ${label} tx ${tx.hash}`);
   const r = await tx.wait();
   if (!r || r.status !== 1) {
     throw new Error(`Tx ${label} REVERTED (status=${r?.status}) hash=${tx.hash}`);
   }
   console.log(`    ✓ block ${r.blockNumber}, gas ${r.gasUsed}`);
+  if (fheMutating && SEPOLIA_PACE_MS > 0) {
+    // Coprocessor lag mitigation — see SEPOLIA-PACING note at top.
+    await new Promise((res) => setTimeout(res, SEPOLIA_PACE_MS));
+  }
   return r;
 }
 

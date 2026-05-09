@@ -173,6 +173,9 @@ If you just generated code containing any of these, STOP and fix:
 | `npm install @zama-fhe/relayer-sdk@0.4.1` without `--save-exact` | Silently writes `"^0.4.1"` to `package.json` despite the explicit version. Always pin with `npm install --save-exact @zama-fhe/relayer-sdk@0.4.1` so the caret never sneaks back in. |
 | `abi.decode(cleartexts, (uint64))` *(in the on-chain `revealResults`-style callback after `publicDecrypt + checkSignatures`)* | SDK encodes EVERY cleartext as `uint256`: use `abi.decode(cleartexts, (uint256))` then cast down. **Note:** this applies to public-decrypt cleartexts decoded on-chain. The off-chain `userDecrypt` flow returns typed values directly through the SDK — no `abi.decode` needed there. |
 | `FHE.randEuint64(100)` | upperBound must be power of 2: `FHE.randEuint64(128)` then `FHE.rem(r, 100)` |
+| `expect(call).to.be.revertedWithCustomError(c, "MyError")` for a tx that consumes encrypted inputs | Plugin wraps the revert as `HardhatFhevmError: Fhevm assertion failed.` and chai never sees the custom-error selector. Use `try { await call; } catch (e) { expect(e.message).to.match(/MyError\|Fhevm/); }` for any function that takes `externalEuint*` + `inputProof`. Functions guarded by a plaintext check (lifecycle / `onlyOwner`) that revert *before* `FHE.fromExternal` are NOT wrapped — chai matcher works there. See `references/testing-guide.md`. |
+| `BigInt(handleStr)` to check "is this slot uninitialised?" written as `handleStr === 0n` | `confidentialBalanceOf` returns the handle as a `bytes32` **string** in ethers v6, not a BigInt. Comparing a string to a BigInt always returns false. Use `BigInt(handle) === 0n` (cast first). |
+| Sequential FHE-state-mutating txs on Sepolia with no pacing | Coprocessor's view of newly-created handles can lag the host chain by a block or two. Two back-to-back mints/transfers from the same wallet may revert the second with `ERC7984ZeroBalance` even though the first succeeded. Add `await new Promise(r => setTimeout(r, 6000))` between FHE-state-mutating txs in your Sepolia harness, or use a retry loop. Mock-mode is unaffected. |
 
 ## Agent Workflow
 
@@ -439,6 +442,8 @@ function _transfer(address from, address to, euint64 amount) internal {
 ```
 
 FHE transfers NEVER revert on insufficient balance — reverting would leak balance information. They silently transfer 0. This is by design, not a bug.
+
+> **⚠ Asymmetry — uninitialised handles DO revert.** OpenZeppelin's `ERC7984._transfer` reverts with `ERC7984ZeroBalance(from)` if the sender's balance handle has *never been written* (slot is `bytes32(0)`). The "silent transfer 0" rule applies only **after** the slot has been initialised at least once. To exercise the silent-fail path in tests, mint at least 1 unit to the sender first, then test with `amount > balance`. See `references/common-pitfalls.md` §6c. Selector for the revert: `0x5ff91cdc`.
 
 ### Pattern 3: Encrypted Conditional Logic (use `select`, never `if`)
 
