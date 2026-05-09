@@ -1,29 +1,47 @@
-// Test template for standalone confidential contracts (custom FHE pattern).
-// For ERC-7984 standard tokens, use confidentialTransfer/confidentialBalanceOf instead.
+// Test template for ERC-7984 confidential tokens (OpenZeppelin @openzeppelin/confidential-contracts).
+// Matches the contract shipped in templates/confidential-erc20.sol (which inherits ERC7984).
+//
+// ERC-7984 uses:
+//   - confidentialTransfer / confidentialTransferFrom (NOT transfer / transferFrom)
+//   - confidentialBalanceOf  (NOT balanceOf)
+//   - setOperator(address, uint48 until)  (NOT approve(address, amount))
+//
+// For a NON-ERC-7984 custom FHE token (e.g., one you wrote with ERC-20-style names), see
+// the alternative test patterns inside this skill's references/testing-guide.md.
+
 import { ethers, fhevm } from "hardhat";
 import { FhevmType } from "@fhevm/hardhat-plugin";
 import { expect } from "chai";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-// Replace with your contract's type:
-// import type { ConfidentialERC20 } from "../typechain-types";
+// Replace with your contract's typechain types after `npx hardhat compile`:
+// import type { ConfidentialToken } from "../typechain-types";
 
-describe("ConfidentialERC20", function () {
-  let contract: any; // Replace 'any' with your contract type
+describe("ConfidentialToken (ERC-7984)", function () {
+  let contract: any; // Replace 'any' with your typechain type
   let owner: HardhatEthersSigner;
   let alice: HardhatEthersSigner;
   let bob: HardhatEthersSigner;
   let contractAddress: string;
 
   beforeEach(async function () {
+    if (!fhevm.isMock) this.skip();
     [owner, alice, bob] = await ethers.getSigners();
 
-    const factory = await ethers.getContractFactory("ConfidentialERC20");
-    contract = await factory.deploy("TestToken", "TT");
+    const factory = await ethers.getContractFactory("ConfidentialToken");
+    // ERC7984 constructor: (owner_, name_, symbol_, contractURI_)
+    contract = await factory.deploy(
+      owner.address,
+      "TestToken",
+      "TT",
+      "https://example.com/token.json",
+    );
     await contract.waitForDeployment();
     contractAddress = await contract.getAddress();
   });
 
-  // ─── Helper: Encrypt and send ─────────────────────────────────────
+  // ─── Helpers ─────────────────────────────────────────────────────────
+
+  /// Encrypts amount and calls confidentialTransfer (encrypted-input overload).
   async function encryptAndTransfer(
     signer: HardhatEthersSigner,
     to: string,
@@ -35,133 +53,146 @@ describe("ConfidentialERC20", function () {
       .encrypt();
     return contract
       .connect(signer)
-      ["transfer(address,bytes32,bytes)"](to, encrypted.handles[0], encrypted.inputProof);
+      ["confidentialTransfer(address,bytes32,bytes)"](
+        to,
+        encrypted.handles[0],
+        encrypted.inputProof,
+      );
   }
 
-  // ─── Helper: Decrypt balance ──────────────────────────────────────
+  /// Decrypts a user's confidential balance (only the user's own balance).
   async function decryptBalance(user: HardhatEthersSigner): Promise<bigint> {
-    const encHandle = await contract.balanceOf(user.address);
-    return fhevm.userDecryptEuint(FhevmType.euint64, encHandle, contractAddress, user);
+    const handle = await contract.confidentialBalanceOf(user.address);
+    return fhevm.userDecryptEuint(FhevmType.euint64, handle, contractAddress, user);
   }
 
-  // ─── Tests ────────────────────────────────────────────────────────
+  // ─── Tests ───────────────────────────────────────────────────────────
 
-  describe("Minting", function () {
-    it("should mint tokens to owner", async function () {
-      await contract.mint(1000);
-      const balance = await decryptBalance(owner);
-      expect(balance).to.equal(1000n);
-    });
-
-    it("should update total supply", async function () {
-      await contract.mint(5000);
-      expect(await contract.totalSupply()).to.equal(5000n);
-    });
-
-    it("should reject non-owner mint", async function () {
-      await expect(contract.connect(alice).mint(1000)).to.be.reverted;
+  describe("Metadata", function () {
+    it("has correct name, symbol, decimals", async function () {
+      expect(await contract.name()).to.equal("TestToken");
+      expect(await contract.symbol()).to.equal("TT");
+      // ERC-7984 default is 6 decimals (NOT 18)
+      expect(await contract.decimals()).to.equal(6n);
     });
   });
 
-  describe("Transfer", function () {
-    beforeEach(async function () {
-      await contract.mint(1000);
+  describe("Minting", function () {
+    it("mints to owner", async function () {
+      await contract.mint(owner.address, 1000n);
+      expect(await decryptBalance(owner)).to.equal(1000n);
     });
 
-    it("should transfer tokens confidentially", async function () {
-      await encryptAndTransfer(owner, alice.address, 300);
+    it("mints to a different address", async function () {
+      await contract.mint(alice.address, 500n);
+      expect(await decryptBalance(alice)).to.equal(500n);
+    });
 
+    it("rejects non-owner mint", async function () {
+      await expect(contract.connect(alice).mint(alice.address, 1000n)).to.be.reverted;
+    });
+  });
+
+  describe("Confidential Transfer", function () {
+    beforeEach(async function () {
+      await contract.mint(owner.address, 1000n);
+    });
+
+    it("transfers tokens confidentially", async function () {
+      await encryptAndTransfer(owner, alice.address, 300);
       expect(await decryptBalance(owner)).to.equal(700n);
       expect(await decryptBalance(alice)).to.equal(300n);
     });
 
-    it("should silently transfer 0 on insufficient balance", async function () {
-      // Try to transfer 2000 with only 1000 balance
+    it("silently transfers 0 on insufficient balance", async function () {
+      // Try to transfer 2000 with only 1000 balance — no revert, transfers 0.
       await encryptAndTransfer(owner, alice.address, 2000);
-
-      // No revert! But 0 was transferred.
       expect(await decryptBalance(owner)).to.equal(1000n);
       expect(await decryptBalance(alice)).to.equal(0n);
     });
 
-    it("should handle multiple transfers", async function () {
+    it("handles multiple transfers in sequence", async function () {
       await encryptAndTransfer(owner, alice.address, 200);
       await encryptAndTransfer(owner, bob.address, 300);
-
       expect(await decryptBalance(owner)).to.equal(500n);
       expect(await decryptBalance(alice)).to.equal(200n);
       expect(await decryptBalance(bob)).to.equal(300n);
     });
 
-    it("should allow recipient to transfer received tokens", async function () {
+    it("recipient can re-transfer received tokens", async function () {
       await encryptAndTransfer(owner, alice.address, 500);
       await encryptAndTransfer(alice, bob.address, 200);
-
       expect(await decryptBalance(alice)).to.equal(300n);
       expect(await decryptBalance(bob)).to.equal(200n);
     });
   });
 
-  describe("Approval & TransferFrom", function () {
+  describe("Operator Model (replaces ERC-20 approve/allowance)", function () {
     beforeEach(async function () {
-      await contract.mint(1000);
+      await contract.mint(owner.address, 1000n);
     });
 
-    it("should approve and transferFrom", async function () {
-      // Owner approves alice to spend 500
-      const approveEnc = await fhevm
-        .createEncryptedInput(contractAddress, owner.address)
-        .add64(500)
-        .encrypt();
-      await contract.approve(alice.address, approveEnc.handles[0], approveEnc.inputProof);
+    it("operator can call confidentialTransferFrom", async function () {
+      // Owner authorizes Alice as an operator until far-future timestamp.
+      const maxUint48 = 2n ** 48n - 1n;
+      await contract.setOperator(alice.address, maxUint48);
+      expect(await contract.isOperator(owner.address, alice.address)).to.be.true;
 
-      // Alice transfers 300 from owner to bob
-      const transferEnc = await fhevm
+      // Alice (operator) transfers from owner → bob with an encrypted amount.
+      const enc = await fhevm
         .createEncryptedInput(contractAddress, alice.address)
-        .add64(300)
+        .add64(400n)
         .encrypt();
       await contract
         .connect(alice)
-        .transferFrom(owner.address, bob.address, transferEnc.handles[0], transferEnc.inputProof);
+        ["confidentialTransferFrom(address,address,bytes32,bytes)"](
+          owner.address,
+          bob.address,
+          enc.handles[0],
+          enc.inputProof,
+        );
 
-      expect(await decryptBalance(owner)).to.equal(700n);
-      expect(await decryptBalance(bob)).to.equal(300n);
+      expect(await decryptBalance(owner)).to.equal(600n);
+      expect(await decryptBalance(bob)).to.equal(400n);
     });
 
-    it("should silently transfer 0 on insufficient allowance", async function () {
-      // Approve only 100
-      const approveEnc = await fhevm
-        .createEncryptedInput(contractAddress, owner.address)
-        .add64(100)
-        .encrypt();
-      await contract.approve(alice.address, approveEnc.handles[0], approveEnc.inputProof);
-
-      // Try to transfer 500 (exceeds allowance)
-      const transferEnc = await fhevm
+    it("non-operator cannot call confidentialTransferFrom", async function () {
+      const enc = await fhevm
         .createEncryptedInput(contractAddress, alice.address)
-        .add64(500)
+        .add64(100n)
         .encrypt();
-      await contract
-        .connect(alice)
-        .transferFrom(owner.address, bob.address, transferEnc.handles[0], transferEnc.inputProof);
+      await expect(
+        contract
+          .connect(alice)
+          ["confidentialTransferFrom(address,address,bytes32,bytes)"](
+            owner.address,
+            bob.address,
+            enc.handles[0],
+            enc.inputProof,
+          ),
+      ).to.be.reverted;
+    });
 
-      // No revert, 0 transferred
-      expect(await decryptBalance(owner)).to.equal(1000n);
-      expect(await decryptBalance(bob)).to.equal(0n);
+    it("setOperator(addr, 0) revokes operator status", async function () {
+      const maxUint48 = 2n ** 48n - 1n;
+      await contract.setOperator(alice.address, maxUint48);
+      expect(await contract.isOperator(owner.address, alice.address)).to.be.true;
+
+      await contract.setOperator(alice.address, 0);
+      expect(await contract.isOperator(owner.address, alice.address)).to.be.false;
     });
   });
 
   describe("Access Control", function () {
-    it("should only allow balance owner to decrypt", async function () {
-      await contract.mint(1000);
+    it("only the balance owner can decrypt their own balance", async function () {
+      await contract.mint(owner.address, 1000n);
       await encryptAndTransfer(owner, alice.address, 500);
 
-      // Alice can decrypt her own balance
-      const aliceBal = await decryptBalance(alice);
-      expect(aliceBal).to.equal(500n);
+      // Alice can decrypt her own balance.
+      expect(await decryptBalance(alice)).to.equal(500n);
 
-      // Bob should NOT be able to decrypt alice's balance
-      const aliceHandle = await contract.balanceOf(alice.address);
+      // Bob CANNOT decrypt Alice's balance — no FHE.allow(...) was granted to him.
+      const aliceHandle = await contract.confidentialBalanceOf(alice.address);
       await expect(
         fhevm.userDecryptEuint(FhevmType.euint64, aliceHandle, contractAddress, bob),
       ).to.be.rejected;

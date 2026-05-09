@@ -6,7 +6,14 @@ import "@nomicfoundation/hardhat-chai-matchers";
 import "@nomicfoundation/hardhat-ethers";
 import "@nomicfoundation/hardhat-verify";
 import "@typechain/hardhat";
-import "hardhat-deploy";
+// NOTE: hardhat-deploy is INTENTIONALLY NOT imported by default.
+// hardhat-deploy@0.11.45 transitively pulls zksync-web3@0.14.4, which crashes
+// at module-load time on ethers v6 with:
+//   TypeError: Cannot read properties of undefined (reading 'JsonRpcSigner')
+// If you need named-account deployment scripts, install matching versions
+// (e.g. hardhat-deploy >=0.12 once available against Hardhat 2 + ethers 6),
+// then uncomment the import below and the `namedAccounts` block at the bottom.
+// import "hardhat-deploy";
 
 // Option A: Use hardhat vars (recommended):
 //   npx hardhat vars set MNEMONIC
@@ -48,11 +55,12 @@ const config: HardhatUserConfig = {
       chainId: 11155111,
     },
   },
-  namedAccounts: {
-    deployer: 0,
-    alice: 1,
-    bob: 2,
-  },
+  // namedAccounts requires `hardhat-deploy` import above. Uncomment both together.
+  // namedAccounts: {
+  //   deployer: 0,
+  //   alice: 1,
+  //   bob: 2,
+  // },
   // Gas reporting for FHE operation benchmarking
   gasReporter: {
     enabled: process.env.REPORT_GAS === "true",

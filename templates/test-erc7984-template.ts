@@ -15,7 +15,15 @@ type Signers = {
 };
 
 async function deployFixture() {
-  // Replace "MyToken" with your contract name
+  // Replace "MyToken" with your contract name.
+  //
+  // The 4-arg constructor below assumes your token follows the pattern in
+  // templates/confidential-erc20.sol (owner + 3 metadata strings). If your
+  // contract HARD-CODES name/symbol/contractURI in its own constructor (so
+  // the user only passes the owner), drop the last 3 args:
+  //   factory.deploy((await ethers.getSigners())[0].address)
+  // If your contract is fully self-configuring (no constructor args),
+  // call factory.deploy() with no args.
   const factory = await ethers.getContractFactory("MyToken");
   const contract = await factory.deploy(
     /* owner */ (await ethers.getSigners())[0].address,

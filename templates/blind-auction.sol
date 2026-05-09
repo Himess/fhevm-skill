@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {FHE, euint64, ebool, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
+import {FHE, euint64, eaddress, ebool, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
@@ -20,7 +20,13 @@ contract BlindAuction is ZamaEthereumConfig, Ownable2Step {
     uint256 public endTime;
 
     euint64 private _highestBid;
-    address public highestBidder;
+    /// @notice Encrypted address of the actual highest bidder. Updated atomically
+    ///         with `_highestBid` via `FHE.select`. Decryptable only after `endAuction`
+    ///         marks it publicly decryptable, so the leader stays hidden during bidding.
+    eaddress private _highestBidder;
+    /// @notice Plaintext address of the highest bidder, populated by `revealWinner`.
+    ///         Until `revealWinner` runs, this stays at `address(0)`.
+    address public revealedHighestBidder;
     uint256 public bidCount;
 
     mapping(address => euint64) private _bids;
@@ -32,7 +38,7 @@ contract BlindAuction is ZamaEthereumConfig, Ownable2Step {
 
     // ─── Events ─────────────────────────────────────────────────────────
     event BidPlaced(address indexed bidder);
-    event AuctionEnded(address indexed winner, bytes32 highestBidHandle);
+    event AuctionEnded(bytes32 highestBidHandle, bytes32 highestBidderHandle);
     event WinnerRevealed(address indexed winner, uint64 amount);
     event BidRefunded(address indexed bidder);
 
@@ -47,6 +53,9 @@ contract BlindAuction is ZamaEthereumConfig, Ownable2Step {
 
         _highestBid = FHE.asEuint64(0);
         FHE.allowThis(_highestBid);
+
+        _highestBidder = FHE.asEaddress(address(0));
+        FHE.allowThis(_highestBidder);
     }
 
     // ─── Place Bid ──────────────────────────────────────────────────────
@@ -73,54 +82,68 @@ contract BlindAuction is ZamaEthereumConfig, Ownable2Step {
         // Compare with current highest — all encrypted, no one sees the comparison
         ebool isHigher = FHE.gt(bidAmount, _highestBid);
 
-        // Update highest bid (encrypted select — no branching leak)
+        // Update highest bid AND highest bidder atomically — both stay encrypted.
+        // FHE.select keeps the previous values when isHigher is false, so this
+        // is leakage-free: validators cannot tell whether the new bid won.
         _highestBid = FHE.select(isHigher, bidAmount, _highestBid);
         FHE.allowThis(_highestBid);
 
-        // Update highest bidder (uses eaddress for fully encrypted winner tracking)
-        // For simplicity, we track in plaintext which is acceptable since
-        // the bid AMOUNT remains encrypted. The identity of "current leader" changes
-        // with each bid regardless of whether it's actually higher.
-        // To fully hide the leader, use eaddress + FHE.select on addresses.
-        highestBidder = msg.sender;
+        _highestBidder = FHE.select(
+            isHigher,
+            FHE.asEaddress(msg.sender),
+            _highestBidder
+        );
+        FHE.allowThis(_highestBidder);
 
         emit BidPlaced(msg.sender);
     }
 
     // ─── End Auction ────────────────────────────────────────────────────
-    /// @notice End the auction and request public decryption of the highest bid.
+    /// @notice End the auction and request public decryption of the winning bid + bidder.
+    /// @dev Both the encrypted amount AND the encrypted bidder address are revealed.
     function endAuction() external onlyOwner {
         require(state == AuctionState.Bidding, "Auction not active");
         require(block.timestamp >= endTime || bidCount == 0, "Auction not expired");
 
         state = AuctionState.Ended;
 
-        // Request public decryption of the highest bid
         FHE.makePubliclyDecryptable(_highestBid);
+        FHE.makePubliclyDecryptable(_highestBidder);
 
-        emit AuctionEnded(highestBidder, FHE.toBytes32(_highestBid));
+        emit AuctionEnded(FHE.toBytes32(_highestBid), FHE.toBytes32(_highestBidder));
     }
 
+    // ─── Public Handle Views (for off-chain publicDecrypt) ─────────────
+    function highestBidHandle() external view returns (bytes32) { return FHE.toBytes32(_highestBid); }
+    function highestBidderHandle() external view returns (bytes32) { return FHE.toBytes32(_highestBidder); }
+
     // ─── Reveal Winner ──────────────────────────────────────────────────
-    /// @notice Submit KMS decryption proof to reveal the winning bid on-chain.
+    /// @notice Submit KMS decryption proof to reveal both the winning bid AND the winning bidder.
+    /// @dev Handles MUST be in the same order they were marked publicly decryptable in `endAuction`:
+    ///      [0] = _highestBid (uint64), [1] = _highestBidder (address packed as uint256).
     function revealWinner(
         bytes calldata abiEncodedCleartexts,
         bytes calldata decryptionProof
     ) external {
         require(state == AuctionState.Ended, "Auction not ended");
 
-        bytes32[] memory handlesList = new bytes32[](1);
+        bytes32[] memory handlesList = new bytes32[](2);
         handlesList[0] = FHE.toBytes32(_highestBid);
+        handlesList[1] = FHE.toBytes32(_highestBidder);
 
         FHE.checkSignatures(handlesList, abiEncodedCleartexts, decryptionProof);
 
-        // SDK encodes as uint256 — decode and cast
-        uint256 winningBidRaw = abi.decode(abiEncodedCleartexts, (uint256));
-        uint64 winningBid = uint64(winningBidRaw);
-        revealedHighestBid = winningBid;
-        state = AuctionState.Revealed;
+        // SDK encodes ALL cleartexts as uint256, regardless of source type.
+        // - euint64 → uint64(uint256)
+        // - eaddress → address(uint160(uint256))
+        (uint256 winningBidRaw, uint256 winningBidderRaw) =
+            abi.decode(abiEncodedCleartexts, (uint256, uint256));
 
-        emit WinnerRevealed(highestBidder, winningBid);
+        revealedHighestBid     = uint64(winningBidRaw);
+        revealedHighestBidder  = address(uint160(winningBidderRaw));
+        state                  = AuctionState.Revealed;
+
+        emit WinnerRevealed(revealedHighestBidder, revealedHighestBid);
     }
 
     // ─── View Own Bid ───────────────────────────────────────────────────

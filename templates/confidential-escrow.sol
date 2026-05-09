@@ -95,12 +95,16 @@ contract ConfidentialEscrow is ZamaEthereumConfig {
 
         escrowId = nextEscrowId++;
 
-        // Grant the token contract transient access to the amount handle
-        // so it can perform FHE operations (sub from buyer, add to escrow)
+        // ORDERING IS LOAD-BEARING: allowTransient MUST come BEFORE the call.
+        //   - allowTransient grants the token contract permission to read this handle.
+        //   - That permission is used inside the token's FHE math (sub from buyer, add to escrow).
+        //   - Calling allowTransient AFTER confidentialTransferFrom would be too late —
+        //     the token would have already failed with "Sender not allowed" inside _update.
         FHE.allowTransient(amount, address(token));
 
-        // Transfer tokens from buyer to this escrow contract
-        // Buyer must have called token.setOperator(address(this), expiry) beforehand
+        // Transfer tokens from buyer to this escrow contract.
+        // PRECONDITION: buyer must have called token.setOperator(address(this), expiry)
+        //               in a separate transaction BEFORE calling createEscrow.
         euint64 transferred = token.confidentialTransferFrom(
             msg.sender,
             address(this),
@@ -117,10 +121,15 @@ contract ConfidentialEscrow is ZamaEthereumConfig {
 
         // ACL: contract can access this amount in future transactions
         FHE.allowThis(transferred);
-        // ACL: buyer can decrypt their escrow amount
+        // ACL: buyer can decrypt their own escrow amount any time
         FHE.allow(transferred, msg.sender);
-        // ACL: seller can decrypt their pending escrow amount
-        FHE.allow(transferred, seller);
+        // NOTE: seller and arbiter intentionally do NOT receive ACL here.
+        //       The seller learns the amount only on `release` (when funds
+        //       transfer to them and the token contract grants them ACL on
+        //       their balance). Pre-disclosure to the seller would violate
+        //       the escrow's privacy contract — a buyer could learn that the
+        //       seller has visibility into the escrow before any release
+        //       decision, which is a leakage channel.
 
         emit EscrowCreated(escrowId, msg.sender, seller, arbiter);
     }
@@ -164,8 +173,13 @@ contract ConfidentialEscrow is ZamaEthereumConfig {
     }
 
     // ─── View Functions ────────────────────────────────────────────────
-    /// @notice Returns the encrypted amount for an escrow.
-    ///         Only parties with ACL access (buyer, seller) can decrypt.
+    /// @notice Returns the encrypted amount handle for an escrow.
+    /// @dev    The handle is publicly readable, but only parties whose address
+    ///         was granted ACL via `FHE.allow` can decrypt it via the Relayer
+    ///         SDK. Currently the buyer (granted at `createEscrow`) and any
+    ///         recipient of `_sendToRecipient` (post-release / post-resolve,
+    ///         granted indirectly through the token's per-balance ACL) have
+    ///         decryption rights on their respective views.
     function getEscrowAmount(uint256 escrowId) external view returns (euint64) {
         return escrows[escrowId].amount;
     }

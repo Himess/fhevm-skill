@@ -37,12 +37,14 @@ contract EncryptedVoting is ZamaEthereumConfig, Ownable2Step {
         proposal = _proposal;
         state = VotingState.Active;
 
-        // Initialize encrypted tallies
+        // Initialize encrypted tallies + grant owner audit access via getTallies()
         _yesVotes = FHE.asEuint64(0);
         FHE.allowThis(_yesVotes);
+        FHE.allow(_yesVotes, msg.sender);
 
         _noVotes = FHE.asEuint64(0);
         FHE.allowThis(_noVotes);
+        FHE.allow(_noVotes, msg.sender);
     }
 
     // ─── Vote ───────────────────────────────────────────────────────────
@@ -63,12 +65,15 @@ contract EncryptedVoting is ZamaEthereumConfig, Ownable2Step {
         euint64 voteAsYes = FHE.select(voteChoice, FHE.asEuint64(1), FHE.asEuint64(0));
         euint64 voteAsNo = FHE.select(voteChoice, FHE.asEuint64(0), FHE.asEuint64(1));
 
-        // Tally (encrypted addition — nobody sees individual votes)
+        // Tally (encrypted addition — nobody sees individual votes).
+        // ACL: contract + owner re-granted on the new handles so getTallies() stays usable.
         _yesVotes = FHE.add(_yesVotes, voteAsYes);
         FHE.allowThis(_yesVotes);
+        FHE.allow(_yesVotes, owner());
 
         _noVotes = FHE.add(_noVotes, voteAsNo);
         FHE.allowThis(_noVotes);
+        FHE.allow(_noVotes, owner());
 
         emit VoteCast(msg.sender);
     }

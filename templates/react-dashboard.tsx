@@ -1,5 +1,14 @@
-// Example React dashboard for interacting with an ERC-7984 confidential token.
-// Uses @zama-fhe/relayer-sdk/web for encryption/decryption.
+// ────────────────────────────────────────────────────────────────────────────────
+// Gen-2 React dashboard — uses @zama-fhe/relayer-sdk/web (low-level, manual flow).
+// Choose this when you need fine-grained control, are integrating into an existing
+// codebase, or are building UI for non-ERC-7984 confidential contracts.
+//
+// For NEW apps using ERC-7984 tokens, prefer the Gen-3 hook-based API:
+//   → templates/react-dashboard-v3.tsx  (uses @zama-fhe/react-sdk + ZamaProvider)
+// ────────────────────────────────────────────────────────────────────────────────
+//
+// This file: example React dashboard for interacting with an ERC-7984 confidential token
+// using @zama-fhe/relayer-sdk/web for encryption/decryption directly.
 // Requires: "use client" directive for Next.js compatibility.
 "use client";
 
