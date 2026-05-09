@@ -187,13 +187,17 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
 
     // ─── Admin: Add Liquidity ─────────────────────────────────────────
     /// @notice Owner deposits TokenA reserves. Must setOperator first.
+    /// @dev Even though this function is onlyOwner, the canonical ERC-7984
+    ///      pattern is to bind the actual transferred amount. An underfunded
+    ///      owner would otherwise see a successful tx that funded zero.
     function addLiquidityA(
         externalEuint64 encAmount,
         bytes calldata inputProof
     ) external onlyOwner {
         euint64 amount = FHE.fromExternal(encAmount, inputProof);
         FHE.allowTransient(amount, address(tokenA));
-        tokenA.confidentialTransferFrom(msg.sender, address(this), amount);
+        euint64 actual = tokenA.confidentialTransferFrom(msg.sender, address(this), amount);
+        FHE.allowThis(actual);
     }
 
     /// @notice Owner deposits TokenB reserves. Must setOperator first.
@@ -203,7 +207,8 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
     ) external onlyOwner {
         euint64 amount = FHE.fromExternal(encAmount, inputProof);
         FHE.allowTransient(amount, address(tokenB));
-        tokenB.confidentialTransferFrom(msg.sender, address(this), amount);
+        euint64 actual = tokenB.confidentialTransferFrom(msg.sender, address(this), amount);
+        FHE.allowThis(actual);
     }
 
     // ─── Admin: Withdraw Fees ─────────────────────────────────────────

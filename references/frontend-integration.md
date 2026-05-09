@@ -192,13 +192,15 @@ When calling FHEVM contracts from JavaScript/TypeScript, encrypted types map to 
 
 ### ABI Fragment Example
 
+> **For new code, use the ERC-7984 ABI fragment in the next section.** The block below is the **legacy `ConfidentialERC20`** shape (deprecated `fhevm-contracts` package, archived in 2025) and is kept only so you can recognise / migrate older codebases. The function names and return types are different from ERC-7984.
+
 ```typescript
-// For a ConfidentialERC20 with these Solidity functions:
+// LEGACY ConfidentialERC20 (deprecated — for migration reference only):
 //   function transfer(address to, externalEuint64 amount, bytes calldata proof)
 //   function balanceOf(address) view returns (euint64)
 //   function approve(address spender, externalEuint64 amount, bytes calldata proof)
 
-const ABI = [
+const LEGACY_ABI = [
     "function transfer(address to, bytes32 encryptedAmount, bytes inputProof) returns (bool)",
     "function balanceOf(address account) view returns (uint256)",
     "function approve(address spender, bytes32 encryptedAmount, bytes inputProof) returns (bool)",
@@ -207,8 +209,11 @@ const ABI = [
     "function totalSupply() view returns (uint64)",
     "function allowance(address owner, address spender) view returns (uint256)",
 ];
+// ⚠ Returns `bool` here is wrong for ERC-7984 — the new standard returns
+// `uint256` (the post-transfer encrypted handle). Don't paste this fragment
+// into new ERC-7984 code.
 
-const contract = new ethers.Contract(contractAddress, ABI, signer);
+const contract = new ethers.Contract(contractAddress, LEGACY_ABI, signer);
 ```
 
 ### ERC-7984 ABI Fragment (with Ownable2Step)

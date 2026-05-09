@@ -120,7 +120,14 @@ echo ""
 
 # ─── Check 6: evmVersion in hardhat config ───────────────────────────
 echo "--- Check 6: Hardhat evmVersion ---"
-HARDHAT_CONFIG=$(find "$DIR" -name "hardhat.config.*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
+# Look in $DIR first; if not found, walk up to the parent (a common invocation
+# is `bash skill/scripts/validate-fhevm.sh ./contracts` from the project root,
+# which would otherwise miss `./hardhat.config.ts` sitting at the project root).
+HARDHAT_CONFIG=$(find "$DIR" -maxdepth 3 -name "hardhat.config.*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
+if [ -z "$HARDHAT_CONFIG" ]; then
+    PARENT_DIR="$(dirname "$DIR")"
+    HARDHAT_CONFIG=$(find "$PARENT_DIR" -maxdepth 2 -name "hardhat.config.*" -not -path "*/node_modules/*" 2>/dev/null | head -1)
+fi
 if [ -n "$HARDHAT_CONFIG" ]; then
     HAS_CANCUN=$(grep -c 'cancun' "$HARDHAT_CONFIG" 2>/dev/null | tr -d '[:space:]' || echo "0")
     if [ "$HAS_CANCUN" -eq 0 ]; then
@@ -130,7 +137,7 @@ if [ -n "$HARDHAT_CONFIG" ]; then
         echo -e "${GREEN}PASS: evmVersion is set to cancun${NC}"
     fi
 else
-    echo -e "${YELLOW}WARNING: No hardhat.config found${NC}"
+    echo -e "${YELLOW}WARNING: No hardhat.config found in $DIR or its parent${NC}"
     WARNINGS=$((WARNINGS + 1))
 fi
 echo ""
@@ -228,6 +235,36 @@ for file in $SOLFILES; do
     if [ -n "$BAD_TYPE" ]; then
         echo -e "${RED}ERROR: $file uses non-existent encrypted types (ebytes/eint do not exist):${NC}"
         echo "$BAD_TYPE" | while read -r line; do echo "  $line"; done
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+echo ""
+
+# ─── Check 13: confidentialTransferFrom return value discarded ───────
+# The biggest footgun in confidential-DEX patterns: if the caller is underfunded,
+# ERC-7984 silently transfers 0 (per Battle Scar #1 in SKILL.md). Code that
+# computes the output leg from the *requested* amount instead of the *actual
+# transferred* amount is drainable. Detect by flagging:
+#   <token>.confidentialTransferFrom(...);     // line by itself, return discarded
+# vs the safe form:
+#   euint64 actual = <token>.confidentialTransferFrom(...);
+echo "--- Check 13: Discarded confidentialTransferFrom return ---"
+for file in $SOLFILES; do
+    # Match a line that starts (after whitespace) with a token call to
+    # confidentialTransferFrom and is NOT preceded on the same line by an
+    # assignment (`=`) or a return-style binding. Multi-line calls handled
+    # by checking the closing paren/semicolon line in the same loop.
+    BAD_DROP=$(grep -nE '^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*\.confidentialTransferFrom\(' "$file" 2>/dev/null \
+        | grep -vE '=' \
+        | grep -vE 'return ' \
+        || true)
+    if [ -n "$BAD_DROP" ]; then
+        echo -e "${RED}ERROR: $file calls confidentialTransferFrom but discards the return value:${NC}"
+        echo "$BAD_DROP" | while read -r line; do echo "  $line"; done
+        echo -e "  ${YELLOW}HINT:${NC} bind the result and use it for downstream math:"
+        echo "    euint64 actual = token.confidentialTransferFrom(...);"
+        echo "    FHE.allowThis(actual);"
+        echo "    // ... derive output / fee / state from \`actual\`, NOT the request."
         ERRORS=$((ERRORS + 1))
     fi
 done
