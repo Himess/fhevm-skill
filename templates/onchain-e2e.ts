@@ -52,6 +52,24 @@
 // transfers, deposits, swaps). The `waitForTx` helper below pauses
 // `SEPOLIA_PACE_MS` after each successful FHE tx — set to 0 if your
 // flow doesn't include back-to-back mutations.
+//
+// ─── SEPOLIA-GAS-AND-FEE ────────────────────────────────────────────
+// Two more Sepolia footguns the stress-test agents hit:
+//
+//   (a) Ethers' default `estimateGas` under-estimates by 100-1000 gas
+//       on FHE-heavy txs (3+ sequential ops). One run OOG-reverted at
+//       `gasUsed=489117 / gasLimit=489947` (830 gas of headroom). Always
+//       set an explicit `gasLimit` on FHE-state-mutating calls. Default
+//       below is `2_000_000n` — generous for any single-tx flow within
+//       the 20 M HCU per-tx budget.
+//
+//   (b) Sepolia public-node default priority fee (1 gwei) frequently
+//       gets silently dropped from public mempools. The fix is to bump
+//       `maxPriorityFeePerGas` by 3 gwei on top of `getFeeData()` and
+//       re-derive `maxFeePerGas`.
+//
+// The `sepoliaTxOpts(...)` helper below packages both fixes. Spread it
+// into your contract call: `await c.foo(args, await sepoliaTxOpts())`.
 
 import { ethers } from "ethers"; // raw ethers, NOT `from "hardhat"`
 import hre from "hardhat";
@@ -89,6 +107,43 @@ function etherscan(hashOrAddr: string, type: "tx" | "address" = "tx") {
 // (6 seconds) if you're submitting back-to-back mints/transfers/swaps on
 // the same wallet — see SEPOLIA-PACING note at top.
 const SEPOLIA_PACE_MS = Number(process.env.SEPOLIA_PACE_MS ?? "6000");
+
+// Default gas limit for FHE-state-mutating txs. Ethers' default
+// `estimateGas` consistently under-estimates Sepolia coprocessor overhead
+// for functions that do ≥3 sequential FHE ops back-to-back; the 7-agent
+// stress-test caught one OOG with `gasUsed=489117 / gasLimit=489947`
+// (only 830 gas of headroom). Bumping to 2 M is generous for any
+// realistic single-tx FHE flow within the 20 M HCU per-tx budget.
+const FHE_TX_GAS_LIMIT = BigInt(process.env.FHE_TX_GAS_LIMIT ?? "2000000");
+
+// Priority-fee floor in gwei. Sepolia public-node defaults of 1 gwei
+// frequently get silently dropped from the public mempool; 3 gwei
+// extra tip tends to confirm within a block. Override to 0 if you're
+// running against an RPC that handles fee bumping itself.
+const SEPOLIA_PRIORITY_TIP_GWEI = Number(process.env.SEPOLIA_PRIORITY_TIP_GWEI ?? "3");
+
+/**
+ * Build EIP-1559 fee overrides for a state-mutating tx.
+ * Reads current `getFeeData()` and adds `SEPOLIA_PRIORITY_TIP_GWEI` gwei
+ * on top of `maxPriorityFeePerGas`, then re-derives `maxFeePerGas`.
+ * Returns `{ gasLimit, maxFeePerGas, maxPriorityFeePerGas }` ready to
+ * spread into a contract call: `await c.foo(...args, await sepoliaTxOpts());`
+ */
+async function sepoliaTxOpts(extra?: Record<string, any>) {
+  const fd = await provider.getFeeData();
+  const tipBump = ethers.parseUnits(String(SEPOLIA_PRIORITY_TIP_GWEI), "gwei");
+  const baseTip = fd.maxPriorityFeePerGas ?? ethers.parseUnits("1", "gwei");
+  const maxPriorityFeePerGas = baseTip + tipBump;
+  // Bump the cap by the same amount so tx is still valid under EIP-1559.
+  const baseMaxFee = fd.maxFeePerGas ?? ethers.parseUnits("10", "gwei");
+  const maxFeePerGas = baseMaxFee + tipBump;
+  return {
+    gasLimit: FHE_TX_GAS_LIMIT,
+    maxFeePerGas,
+    maxPriorityFeePerGas,
+    ...(extra ?? {}),
+  };
+}
 
 async function waitForTx(tx: any, label: string, fheMutating: boolean = true) {
   console.log(`  → ${label} tx ${tx.hash}`);
@@ -150,8 +205,11 @@ async function main() {
   console.log(`    handle: ${handle.slice(0, 18)}...`);
 
   // 3. SUBMIT TX ─────────────────────────────────────────────────────
+  // Spread `await sepoliaTxOpts()` to apply the explicit gasLimit + bumped
+  // priority-fee. Any FHE-state-mutating tx benefits — no harm spreading
+  // it on plain calls too.
   console.log("\n[3] Submit on-chain");
-  const tx = await contract.myMethod(handle, inputProof); // ← your method
+  const tx = await contract.myMethod(handle, inputProof, await sepoliaTxOpts()); // ← your method
   const receipt = await waitForTx(tx, "myMethod");
 
   // 4. PUBLIC DECRYPT (KMS roundtrip) ────────────────────────────────
@@ -184,6 +242,7 @@ async function main() {
   const revealTx = await (contract as any).revealResult(
     decrypted.abiEncodedClearValues,
     decrypted.decryptionProof,
+    await sepoliaTxOpts(),
   );
   await waitForTx(revealTx, "revealResult");
 
