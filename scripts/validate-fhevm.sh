@@ -47,25 +47,31 @@ fi
 echo ""
 
 # ─── Check 2: Missing FHE.allowThis() after FHE operations ──────────
+# Only flag if a file uses state-mutating FHE ops AND has zero allowThis at all.
+# (The previous heuristic counted *every* FHE.* call vs allowThis count, which
+# false-positives on every non-trivial contract because plenty of FHE ops produce
+# locals that don't need allowThis. We've kept the heuristic simple: a contract
+# that uses any add/sub/mul/div/select/fromExternal but never calls allowThis is
+# almost certainly broken.)
 echo "--- Check 2: Missing FHE.allowThis() ---"
 for file in $SOLFILES; do
-    # Count FHE state-changing operations (add, sub, mul, select, fromExternal)
-    OPS=$(grep -c 'FHE\.\(add\|sub\|mul\|div\|rem\|select\|fromExternal\|min\|max\|and\|or\|xor\|not\|neg\|asEuint\|asEbool\|asEaddress\|randE\)' "$file" 2>/dev/null | tr -d '[:space:]' || echo "0")
-    ALLOWS=$(grep -c 'FHE\.allowThis' "$file" 2>/dev/null | tr -d '[:space:]' || echo "0")
+    # State-mutating ops only — these are the ones that produce a handle the
+    # contract is likely to store. Comparison/cast helpers are excluded.
+    OPS=$(grep -cE 'FHE\.(add|sub|mul|div|rem|select|fromExternal)\(' "$file" 2>/dev/null | tr -d '[:space:]' || echo "0")
+    ALLOWS=$(grep -cE 'FHE\.allowThis\(' "$file" 2>/dev/null | tr -d '[:space:]' || echo "0")
 
-    # Skip contracts extending ERC7984 (ACL handled by base class)
+    # Skip contracts extending ERC7984 (ACL handled by base class _update).
     EXTENDS_ERC7984=$(grep -c 'ERC7984' "$file" 2>/dev/null | tr -d '[:space:]' || echo "0")
 
     if [ "$OPS" -gt 0 ] && [ "$ALLOWS" -eq 0 ] && [ "$EXTENDS_ERC7984" -eq 0 ]; then
-        echo -e "${RED}ERROR: $file has $OPS FHE operations but NO FHE.allowThis() calls${NC}"
+        echo -e "${RED}ERROR: $file has $OPS state-mutating FHE operations but NO FHE.allowThis() calls${NC}"
         ERRORS=$((ERRORS + 1))
     elif [ "$OPS" -gt 0 ] && [ "$ALLOWS" -eq 0 ] && [ "$EXTENDS_ERC7984" -gt 0 ]; then
         echo -e "${GREEN}OK: $file extends ERC7984 (ACL handled by base class)${NC}"
-    elif [ "$OPS" -gt 0 ] && [ "$ALLOWS" -lt "$OPS" ]; then
-        # Not all operations need allowThis (e.g., temporary values), so just warn
-        echo -e "${YELLOW}WARNING: $file has $OPS FHE operations but only $ALLOWS FHE.allowThis() calls${NC}"
-        WARNINGS=$((WARNINGS + 1))
     fi
+    # No "OPS > ALLOWS" warning — that heuristic produced too many false positives.
+    # Real correctness requires checking that EACH stored handle has its own
+    # allowThis, which needs an AST walk. Let solc + tests catch the rest.
 done
 echo ""
 
@@ -131,11 +137,28 @@ echo ""
 
 # ─── Check 7: Random in view functions ───────────────────────────────
 echo "--- Check 7: Random in view functions ---"
+# Use awk to walk each file. Track the most recent function declaration
+# (its modifier list); if the body contains FHE.rand* before the next
+# function header, flag it. This catches `function foo(...) external view ...`
+# blocks that subsequently call FHE.randEuintN().
 for file in $SOLFILES; do
-    # Simplified check: look for randE in view/pure functions
-    BAD_RAND=$(grep -B5 'FHE\.rand' "$file" 2>/dev/null | grep -l '\(view\|pure\)' 2>/dev/null || true)
-    if [ -n "$BAD_RAND" ]; then
-        echo -e "${RED}ERROR: $file may use FHE.rand* in a view/pure function (requires state mutation)${NC}"
+    BAD_RAND_LINES=$(awk '
+        /^[[:space:]]*function[[:space:]]/ {
+            current_fn = $0
+            in_fn = 1
+            next
+        }
+        in_fn && /FHE\.rand[A-Za-z]+\s*\(/ {
+            if (current_fn ~ /\b(view|pure)\b/) {
+                print FILENAME ":" NR ": " $0
+                bad++
+            }
+        }
+        END { exit (bad ? 0 : 1) }
+    ' "$file" 2>/dev/null || true)
+    if [ -n "$BAD_RAND_LINES" ]; then
+        echo -e "${RED}ERROR: $file uses FHE.rand* in a view/pure function (requires state mutation):${NC}"
+        echo "$BAD_RAND_LINES" | sed 's/^/  /'
         ERRORS=$((ERRORS + 1))
     fi
 done
@@ -186,7 +209,10 @@ echo ""
 # ─── Check 11: Hallucinated functions ────────────────────────────────
 echo "--- Check 11: Non-existent FHE functions ---"
 for file in $SOLFILES; do
-    BAD_FN=$(grep -n 'FHE\.\(decrypt\|safeAdd\|safeSub\|safeMul\|allowForDecryption\|sealoutput\|isIn\)' "$file" 2>/dev/null || true)
+    # Anchor each pattern with `(` so prefix matches don't fire — `isIn` would
+    # otherwise hit `isInitialized` (a real, documented helper). Same trick
+    # avoids `decrypt` matching `decryption` in identifier names.
+    BAD_FN=$(grep -nE 'FHE\.(decrypt|safeAdd|safeSub|safeMul|allowForDecryption|sealoutput|isIn)\(' "$file" 2>/dev/null || true)
     if [ -n "$BAD_FN" ]; then
         echo -e "${RED}ERROR: $file uses non-existent FHE functions:${NC}"
         echo "$BAD_FN" | while read -r line; do echo "  $line"; done
