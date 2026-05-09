@@ -126,14 +126,17 @@ contract ConfidentialAMM is ZamaEthereumConfig, Ownable2Step {
         if (totalLPShares != 0) revert PoolAlreadyInitialized();
         if (initialShares == 0) revert ZeroShares();
 
-        euint64 amountA = FHE.fromExternal(encAmountA, inputProof);
-        euint64 amountB = FHE.fromExternal(encAmountB, inputProof);
+        euint64 requestedA = FHE.fromExternal(encAmountA, inputProof);
+        euint64 requestedB = FHE.fromExternal(encAmountB, inputProof);
 
-        _pullA(msg.sender, amountA);
-        _pullB(msg.sender, amountB);
+        // Add the AMOUNT ACTUALLY TRANSFERRED to reserves, not the request.
+        // Owner-only here so a drain attack is unrealistic, but using actuals
+        // keeps the pattern consistent with addLiquidity / swap.
+        euint64 actualA = _pullA(msg.sender, requestedA);
+        euint64 actualB = _pullB(msg.sender, requestedB);
 
-        _reserveA = FHE.add(_reserveA, amountA);
-        _reserveB = FHE.add(_reserveB, amountB);
+        _reserveA = FHE.add(_reserveA, actualA);
+        _reserveB = FHE.add(_reserveB, actualB);
         FHE.allowThis(_reserveA);
         FHE.allowThis(_reserveB);
         // Owner can decrypt reserves so they can compute fair swap quotes.
@@ -162,18 +165,38 @@ contract ConfidentialAMM is ZamaEthereumConfig, Ownable2Step {
         if (totalLPShares == 0) revert PoolNotInitialized();
         if (sharesToMint == 0) revert ZeroShares();
 
-        euint64 amountA = FHE.fromExternal(encAmountA, inputProof);
-        euint64 amountB = FHE.fromExternal(encAmountB, inputProof);
+        euint64 requestedA = FHE.fromExternal(encAmountA, inputProof);
+        euint64 requestedB = FHE.fromExternal(encAmountB, inputProof);
 
-        _pullA(msg.sender, amountA);
-        _pullB(msg.sender, amountB);
+        // Add the AMOUNT ACTUALLY TRANSFERRED to reserves. If the LP is
+        // underfunded, ERC-7984 silently transfers 0 — adding the requested
+        // amount would let the LP mint shares against reserves that never
+        // arrived (drain via the redeem path).
+        euint64 actualA = _pullA(msg.sender, requestedA);
+        euint64 actualB = _pullB(msg.sender, requestedB);
 
-        _reserveA = FHE.add(_reserveA, amountA);
-        _reserveB = FHE.add(_reserveB, amountB);
+        _reserveA = FHE.add(_reserveA, actualA);
+        _reserveB = FHE.add(_reserveB, actualB);
         FHE.allowThis(_reserveA);
         FHE.allowThis(_reserveB);
         FHE.allow(_reserveA, owner());
         FHE.allow(_reserveB, owner());
+
+        // Encrypted gate on the LP's minted shares: if either leg fell short,
+        // mint 0 shares instead of `sharesToMint`. The cheater cannot redeem
+        // value because FHE.le in removeLiquidity will see they hold 0 shares.
+        //
+        // ⚠ KNOWN DESIGN TENSION (totalLPShares is plaintext): the plaintext
+        // counter still increments by `sharesToMint` regardless. This dilutes
+        // honest LPs' redemption math but the cheater can't extract the gap —
+        // their encrypted share balance stays at zero. For a stricter design,
+        // make totalLPShares itself encrypted (lose the plaintext denominator
+        // optimisation in removeLiquidity).
+        ebool fullA = FHE.eq(actualA, requestedA);
+        ebool fullB = FHE.eq(actualB, requestedB);
+        ebool funded = FHE.and(fullA, fullB);
+        euint64 mintedShares = FHE.select(funded, FHE.asEuint64(sharesToMint), FHE.asEuint64(0));
+        FHE.allowThis(mintedShares);
 
         totalLPShares += sharesToMint;
         // Lazy-init mapping pattern (acl-patterns.md "Lazy-Init Mapping Handles")
@@ -181,7 +204,7 @@ contract ConfidentialAMM is ZamaEthereumConfig, Ownable2Step {
         if (!FHE.isInitialized(prev)) {
             prev = FHE.asEuint64(0);
         }
-        euint64 newShares = FHE.add(prev, FHE.asEuint64(sharesToMint));
+        euint64 newShares = FHE.add(prev, mintedShares);
         _lpShares[msg.sender] = newShares;
         FHE.allowThis(newShares);
         FHE.allow(newShares, msg.sender);
@@ -249,19 +272,21 @@ contract ConfidentialAMM is ZamaEthereumConfig, Ownable2Step {
         bool isAtoB,
         bytes calldata inputProof
     ) external {
-        euint64 amountIn = FHE.fromExternal(encAmountIn, inputProof);
+        euint64 requestedIn = FHE.fromExternal(encAmountIn, inputProof);
         euint64 amountOut = FHE.fromExternal(expectedAmountOut, inputProof);
 
-        // Apply 0.3% fee. amountInAfterFee = amountIn * FEE_NUM / FEE_DEN.
+        // Pull from the trader and capture the AMOUNT ACTUALLY TRANSFERRED.
+        // ERC-7984 silently transfers 0 on insufficient balance — using the
+        // requested amount for the constant-product check would let an
+        // underfunded caller satisfy the invariant trivially and drain the
+        // output reserve (Battle Scar #1).
+        euint64 amountIn = isAtoB
+            ? _pullA(msg.sender, requestedIn)
+            : _pullB(msg.sender, requestedIn);
+
+        // Apply 0.3% fee on the ACTUAL pulled amount.
         euint64 amountInAfterFee = FHE.div(FHE.mul(amountIn, FEE_NUM), FEE_DEN);
         euint64 fee = FHE.sub(amountIn, amountInAfterFee);
-
-        // Pull amountIn (full, including fee) from the trader.
-        if (isAtoB) {
-            _pullA(msg.sender, amountIn);
-        } else {
-            _pullB(msg.sender, amountIn);
-        }
 
         // Constant-product invariant check in encrypted domain:
         //   (reserveIn + amountInAfterFee) * (reserveOut - amountOut)
@@ -280,8 +305,10 @@ contract ConfidentialAMM is ZamaEthereumConfig, Ownable2Step {
         ebool ok = FHE.ge(newK, oldK);
 
         // Gate the trade: if invariant fails (caller cheated on amountOut),
-        // both legs become 0. Refund full amountIn so the trader is whole.
-        // The fee is also gated to 0 — caller burned gas only.
+        // both legs become 0. Refund the actually-pulled amountIn so the
+        // trader is whole; the fee is also gated to 0 — caller burned gas only.
+        // Because the refund uses ACTUAL (not requested), an underfunded
+        // caller refunds 0 here, matching what they paid in.
         euint64 gatedOut = FHE.select(ok, amountOut, FHE.asEuint64(0));
         euint64 gatedInAfterFee = FHE.select(ok, amountInAfterFee, FHE.asEuint64(0));
         euint64 gatedFee = FHE.select(ok, fee, FHE.asEuint64(0));
@@ -344,14 +371,21 @@ contract ConfidentialAMM is ZamaEthereumConfig, Ownable2Step {
     }
 
     // ─── Internal: token pull/push helpers ───────────────────────────
-    function _pullA(address from, euint64 amount) internal {
+    /// @dev Returns the AMOUNT ACTUALLY TRANSFERRED. ERC-7984 silently sends 0
+    ///      on insufficient balance instead of reverting (Battle Scar #1) — the
+    ///      caller MUST use this return value, not the requested handle, for
+    ///      every downstream computation. Otherwise an underfunded user can
+    ///      mint shares / drain reserves at no cost.
+    function _pullA(address from, euint64 amount) internal returns (euint64 actual) {
         FHE.allowTransient(amount, address(tokenA));
-        tokenA.confidentialTransferFrom(from, address(this), amount);
+        actual = tokenA.confidentialTransferFrom(from, address(this), amount);
+        FHE.allowThis(actual);
     }
 
-    function _pullB(address from, euint64 amount) internal {
+    function _pullB(address from, euint64 amount) internal returns (euint64 actual) {
         FHE.allowTransient(amount, address(tokenB));
-        tokenB.confidentialTransferFrom(from, address(this), amount);
+        actual = tokenB.confidentialTransferFrom(from, address(this), amount);
+        FHE.allowThis(actual);
     }
 
     function _pushA(address to, euint64 amount) internal {
