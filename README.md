@@ -31,7 +31,7 @@ The agent will read [`SKILL.md`](SKILL.md) first; that file routes to whichever 
 ```
 fhevm-skill/
 ├── SKILL.md           ← agent entry point: architecture, decision trees, patterns
-├── references/        ← 13 deep-dive guides (types, ACL, decryption, ERC-7984, …)
+├── references/        ← 15 deep-dive guides (types, ACL, decryption, ERC-7984, time-based accrual, …)
 ├── templates/         ← paste-ready files (10 contracts + 6 tests + 2 React frontends + Vite frontend + on-chain E2E + deploy + config)
 ├── scripts/           ← validate-fhevm.sh — 13-rule lint
 ├── stress-reports/    ← 9 independent agent stress-test runs (evidence)
@@ -62,7 +62,7 @@ Ten production-ready Solidity contracts plus matching tests + two React dashboar
 
 ### Reference guides
 
-`type-system.md` · `acl-patterns.md` · `input-proofs.md` · `decryption-guide.md` · `erc7984-guide.md` · `testing-guide.md` · `frontend-integration.md` · `sdk-v3-guide.md` · `react-sdk-guide.md` · `common-pitfalls.md` · `gas-optimization.md` · `security-checklist.md` · `zama-upstream.md` · `foundry-vs-hardhat.md`
+`type-system.md` · `acl-patterns.md` · `input-proofs.md` · `decryption-guide.md` · `erc7984-guide.md` · `testing-guide.md` · `frontend-integration.md` · `sdk-v3-guide.md` · `react-sdk-guide.md` · `common-pitfalls.md` · `gas-optimization.md` · `time-based-accrual.md` · `security-checklist.md` · `zama-upstream.md` · `foundry-vs-hardhat.md`
 
 ---
 

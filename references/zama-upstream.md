@@ -100,9 +100,41 @@ Zama ships a registry of canonical confidential ERC-7984 wrappers on Sepolia. **
 > - Already deployed — no extra tx, no extra deploy fee
 > - Match the wrap-rate logic the official wrapper enforces (`_rate = 10**(underlyingDec - 6)`); see `references/erc7984-guide.md` for the rate-scaling pitfall
 > - Recognised by `docs.zama.org`, etherscan integrations, and the Wrappers Registry — easier for anyone reviewing your dApp on-chain
-> - Funded with mock supply by Zama; you can `mint()` for testing without setting up your own faucet
 >
 > **Use `templates/mock-erc20.sol` only when:** you need a custom decimal layout, you're testing a wrap/unwrap edge case the official mocks don't expose (e.g. underlying decimals < 6), or you're running locally on Hardhat / forge-fhevm where these addresses don't exist.
+
+### Funding a test wallet with cUSDC / cWETH (the cTokens are NOT directly mintable)
+
+> **Caveat surfaced by stress-test agent (Round 4):** the wrappers above are `Ownable`. `cUSDCMock.mint(yourAddress, ...)` reverts with `OwnableUnauthorizedAccount` because only the Zama deployer holds the owner role. The path that actually works is the standard wrap flow:
+
+```solidity
+// 1. Read the underlying ERC-20 the wrapper points at
+IERC20 underlying = IERC20(IERC7984Wrapper(cUSDCMock).underlying());
+
+// 2. Mint underlying mock tokens (these are open mocks; permissionless mint)
+underlying.mint(myAddress, 1_000_000e6); // 1M USDC, 6 decimals
+
+// 3. Approve the wrapper to pull
+underlying.approve(cUSDCMock, type(uint256).max);
+
+// 4. Wrap → confidential balance lands on `cUSDCMock`
+IERC7984Wrapper(cUSDCMock).wrap(myAddress, 1_000_000e6);
+```
+
+Underlying mock addresses (open `mint()`) come from the Zama wrappers registry at `0x2f0750Bbb0A246059d80e94c454586a7F27a128e`; query `wrapperOf(underlying)` or `underlyingOf(wrapper)` to bridge between the two. From a test script:
+
+```ts
+// Node SDK / ethers v6
+const wrapper = new ethers.Contract(cUSDCMock, ["function underlying() view returns (address)"], wallet);
+const underlyingAddr = await wrapper.underlying();
+const underlying = new ethers.Contract(underlyingAddr, ["function mint(address,uint256)", "function approve(address,uint256)"], wallet);
+await (await underlying.mint(wallet.address, 1_000_000_000_000n)).wait(); // 1M @ 6 dec
+await (await underlying.approve(cUSDCMock, ethers.MaxUint256)).wait();
+const w = new ethers.Contract(cUSDCMock, ["function wrap(address,uint256)"], wallet);
+await (await w.wrap(wallet.address, 1_000_000_000_000n)).wait();
+```
+
+After `wrap()` the cToken balance is encrypted; user-decrypt or `confidentialBalanceOf` (with ACL) to read it.
 
 ## Upgrade procedure (if Zama ships a breaking version)
 

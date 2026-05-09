@@ -7,6 +7,8 @@
 //
 // Run with:
 //   npx hardhat run scripts/onchain-e2e.ts --network sepolia
+//   (or `ts-node scripts/onchain-e2e.ts` once SEPOLIA_RPC + DEPLOYER_PRIVATE_KEY
+//   are in env — the script bypasses hre.ethers entirely, see WHY-RAW-ETHERS)
 //
 // What this template demonstrates:
 //   1. Deploy a contract with plain ethers (no hardhat-deploy)
@@ -20,14 +22,34 @@
 // public-decrypt + on-chain checkSignatures) is the canonical pattern.
 //
 // PRECONDITIONS:
-//   - hardhat.config.ts has a `sepolia` network entry with PRIVATE_KEY var
-//     (npx hardhat vars set DEPLOYER_PRIVATE_KEY 0x...)
+//   - SEPOLIA_RPC + DEPLOYER_PRIVATE_KEY in process.env (or hardhat vars)
 //   - Deployer has Sepolia ETH (faucets in SKILL.md § Sepolia Deployment)
-//   - @zama-fhe/relayer-sdk@0.4.1 EXACT installed (--save-exact)
+//   - @fhevm/hardhat-plugin@0.4.2 + @zama-fhe/relayer-sdk@0.4.1 EXACT installed
+//   - Contract artifact has been compiled (`npx hardhat compile` once)
+//
+// ─── WHY-RAW-ETHERS ─────────────────────────────────────────────────
+// On Sepolia, `@fhevm/hardhat-plugin@0.4.2` wraps `hre.ethers` with a
+// `FhevmProviderExtender` that throws "The Hardhat Fhevm plugin is not
+// initialized." when you call `hre.ethers.getSigners()` from a script that
+// runs OUTSIDE the plugin's mock test runner. Localhost/mock-mode works,
+// Sepolia does not. Stress-test agents reproduced this in Round 4.
+//
+// Workaround used here: bypass `hre.ethers` and construct a raw
+// `ethers.JsonRpcProvider` + `ethers.Wallet`. We still load the contract
+// ABI via `hre.artifacts.readArtifactSync(...)` so you keep the type-safe
+// compile pipeline. Inside `npx hardhat test`, prefer the `fhevm` helper.
 
-import { ethers } from "hardhat";
+import { ethers } from "ethers"; // raw ethers, NOT `from "hardhat"`
+import hre from "hardhat";
 import { writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
+
+// ─── RAW PROVIDER + SIGNER (avoids FhevmProviderExtender on Sepolia) ──
+const SEPOLIA_RPC = process.env.SEPOLIA_RPC ?? "https://ethereum-sepolia-rpc.publicnode.com";
+const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
+if (!PRIVATE_KEY) throw new Error("DEPLOYER_PRIVATE_KEY not set in env");
+const provider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
+const deployer = new ethers.Wallet(PRIVATE_KEY, provider);
 
 // Lazy-import the relayer SDK so a script that doesn't need the WASM doesn't
 // pay the init cost. Top-level import is fine; this just keeps the helper
@@ -69,19 +91,21 @@ function saveResults(name: string, data: any) {
 
 // ─── E2E: adapt the body to your contract ───────────────────────────
 async function main() {
-  const [deployer] = await ethers.getSigners();
   console.log("=== Onchain E2E on Sepolia ===");
   console.log("Deployer:", deployer.address);
   console.log(
     "Balance:",
-    ethers.formatEther(await ethers.provider.getBalance(deployer.address)),
+    ethers.formatEther(await provider.getBalance(deployer.address)),
     "ETH",
   );
 
   // 1. DEPLOY ────────────────────────────────────────────────────────
   // Replace "MyContract" + constructor args with your deployment.
+  // Artifact is read from the hardhat compile output; the deploy itself
+  // uses raw ethers so we never touch the FhevmProviderExtender.
   console.log("\n[1] Deploy MyContract");
-  const factory = await ethers.getContractFactory("MyContract");
+  const artifact = hre.artifacts.readArtifactSync("MyContract");
+  const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, deployer);
   const contract = await factory.deploy(/* constructor args */);
   await contract.waitForDeployment();
   const addr = await contract.getAddress();
@@ -142,7 +166,9 @@ async function main() {
 
   // ─── (alternative) USER DECRYPT path ────────────────────────────
   // Uncomment to user-decrypt a handle the contract has FHE.allow'd to
-  // your address. EIP-712 signature flow.
+  // your address. EIP-712 signature flow. Note `deployer` here is the
+  // raw `ethers.Wallet` from the top of the file — `signTypedData` works
+  // identically.
   /*
   console.log("\n[alt] User-decrypt own state (real KMS)");
   const stateHandle = await (contract as any).getMyState();
