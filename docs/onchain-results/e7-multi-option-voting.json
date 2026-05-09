@@ -1,0 +1,44 @@
+{
+  "template": "templates/multi-option-voting.sol",
+  "contract": "MultiOptionVoting",
+  "govTokenAddress": "0x4263aed716A433BDeE16ABe1526B7291aBBED8b4",
+  "votingAddress": "0x686a2360FD1Ff1C7a8a758b3e960837Be5637461",
+  "deployer": "0xF505e2E71df58D7244189072008f25f6b6aaE5ae",
+  "choices": [
+    "A",
+    "B",
+    "C"
+  ],
+  "govDeployTx": "0xa5759df835f54f9358fd18b67e1e3b8ae7a4b893f5c4f22de8b2566e0a273791",
+  "votingDeployTx": "0xed2a84a3431b742083e5131ff5f91876a4c16c74df303c6f5e109dc54b1a5df4",
+  "mintTx": "0x9bfb13ee35606b49ee1bfe85e5a73e60fdc0a2644dad5c5e0194980f0760714a",
+  "setOperatorTx": "0xbe91cb8ef30bc0fb1b7943a9bdaae3ec441a1c21c221a9e9eeae9bc91ecfca19",
+  "castVoteTx": "0xfa79d2331e2fa54ed9c9751bb4d80518f76611178a9ce9a1b27cdb816d7939bc",
+  "endVoteTx": "0xb10719c2e5cca580e3aa9e1ba4d18c35c441fa8b2b45aa60060d389e18f861eb",
+  "revealTalliesTx": "0xd8fce98a70712d329b5d593458040845a2b1932f13a767709f3b21bd99267858",
+  "revealedTallies": [
+    "0",
+    "100",
+    "0"
+  ],
+  "winnerIdx": "1",
+  "winnerVotes": "100",
+  "tallyHandles": [
+    "0x0dc7b73ea87e166f4e88be85545018e1b7fb2817baff0000000000aa36a70500",
+    "0xd82a2587dbebbd66581389946a236f08c92b0c453eff0000000000aa36a70500",
+    "0xe252de348f4a94a8575899b4dfdb2afeffd7e4e71dff0000000000aa36a70500"
+  ],
+  "timestamp": "2026-05-09T08:02:13.149Z",
+  "etherscan": {
+    "govToken": "https://sepolia.etherscan.io/address/0x4263aed716A433BDeE16ABe1526B7291aBBED8b4",
+    "voting": "https://sepolia.etherscan.io/address/0x686a2360FD1Ff1C7a8a758b3e960837Be5637461",
+    "govDeploy": "https://sepolia.etherscan.io/tx/0xa5759df835f54f9358fd18b67e1e3b8ae7a4b893f5c4f22de8b2566e0a273791",
+    "votingDeploy": "https://sepolia.etherscan.io/tx/0xed2a84a3431b742083e5131ff5f91876a4c16c74df303c6f5e109dc54b1a5df4",
+    "mint": "https://sepolia.etherscan.io/tx/0x9bfb13ee35606b49ee1bfe85e5a73e60fdc0a2644dad5c5e0194980f0760714a",
+    "setOperator": "https://sepolia.etherscan.io/tx/0xbe91cb8ef30bc0fb1b7943a9bdaae3ec441a1c21c221a9e9eeae9bc91ecfca19",
+    "castVote": "https://sepolia.etherscan.io/tx/0xfa79d2331e2fa54ed9c9751bb4d80518f76611178a9ce9a1b27cdb816d7939bc",
+    "endVote": "https://sepolia.etherscan.io/tx/0xb10719c2e5cca580e3aa9e1ba4d18c35c441fa8b2b45aa60060d389e18f861eb",
+    "revealTallies": "https://sepolia.etherscan.io/tx/0xd8fce98a70712d329b5d593458040845a2b1932f13a767709f3b21bd99267858"
+  },
+  "status": "PASS"
+}

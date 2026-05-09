@@ -1,0 +1,38 @@
+{
+  "template": "templates/confidential-amm.sol",
+  "contract": "ConfidentialAMM",
+  "tokenA": "0xFCF34C8491BC021c0996CCF0C4dec44323b31247",
+  "tokenB": "0x8Ef362BD074790e69d2DA2Ee7e135C52Efb06fd4",
+  "amm": "0x500559A789B5CFe7478533DB021F41832Ed2a016",
+  "deployer": "0xF505e2E71df58D7244189072008f25f6b6aaE5ae",
+  "totalLPShares": "1000",
+  "poolInit": {
+    "amountA": "1000",
+    "amountB": "2000",
+    "shares": "1000"
+  },
+  "swap": {
+    "amountIn": "100",
+    "expectedOut": "180",
+    "direction": "A→B"
+  },
+  "tokenADeployTx": "0x7aba59af7433b75b1d2d73507e27bea3c075feb7c312284f6855425351b4e35f",
+  "tokenBDeployTx": "0x67ff97a535364d696e8af07152db660295310994f410811fbffa73beb7bfe8e9",
+  "ammDeployTx": "0x6178f65da75b5b5e51b7dee79d823e732d2b6d6cdb34c04b12e38f88ee5f5533",
+  "mintATx": "0xb693b10b39f9916a987fc506857376299370915900d0d755cbefdc8b08f2866a",
+  "mintBTx": "0x21edcc10c5b2a8ce8d55465f1ba61385912a0a413d651886bd3c3b300160f2a4",
+  "setOperatorATx": "0xf7f713d88a85b45c9726c3f0c65db6fe71ae2757fdc1417c7a2d2ac93076fffd",
+  "setOperatorBTx": "0x8ba5f1b6094706ea2bbeec99754845a2a53a0b8d394631ce5eb6c17c2c0c006e",
+  "initializeTx": "0xaa7a1913fc5aaf3a07fc7579073cada512e67b157c717da996e13d1636aecd2c",
+  "swapTx": "0xbe9b518fd1d7d6c21a228373717079650743c9db75ab2ec2a55f5add4bcb4da1",
+  "timestamp": "2026-05-09T08:11:00.488Z",
+  "etherscan": {
+    "tokenA": "https://sepolia.etherscan.io/address/0xFCF34C8491BC021c0996CCF0C4dec44323b31247",
+    "tokenB": "https://sepolia.etherscan.io/address/0x8Ef362BD074790e69d2DA2Ee7e135C52Efb06fd4",
+    "amm": "https://sepolia.etherscan.io/address/0x500559A789B5CFe7478533DB021F41832Ed2a016",
+    "ammDeploy": "https://sepolia.etherscan.io/tx/0x6178f65da75b5b5e51b7dee79d823e732d2b6d6cdb34c04b12e38f88ee5f5533",
+    "initialize": "https://sepolia.etherscan.io/tx/0xaa7a1913fc5aaf3a07fc7579073cada512e67b157c717da996e13d1636aecd2c",
+    "swap": "https://sepolia.etherscan.io/tx/0xbe9b518fd1d7d6c21a228373717079650743c9db75ab2ec2a55f5add4bcb4da1"
+  },
+  "status": "PASS"
+}

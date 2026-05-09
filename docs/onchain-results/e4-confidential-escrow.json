@@ -1,0 +1,29 @@
+{
+  "template": "templates/confidential-escrow.sol",
+  "contract": "ConfidentialEscrow",
+  "tokenAddress": "0x4d203DaE3bA141f4D9560B3405EE184184037E5e",
+  "escrowAddress": "0x494fa276C041f88a1b62723dE9bCD00e3C6E0614",
+  "buyer": "0xF505e2E71df58D7244189072008f25f6b6aaE5ae",
+  "seller": "0xfA68D0130F63E0351F5E799D688a199316431d45",
+  "arbiter": "0xF505e2E71df58D7244189072008f25f6b6aaE5ae",
+  "escrowId": "0",
+  "tokenDeployTx": "0x8804ff41a87486670d7e3cd5d7125dc3d43f8b8c01d75b21f39ea2fea64f25bc",
+  "escrowDeployTx": "0xfc6727e6331c15f8d21acc80a9400a308025480a07af82f237aa72fb8a9aaf15",
+  "mintTx": "0x57378addf118f87c0e49f6a39580cd84965eba3bbd356d6944ab855bc8d764bc",
+  "setOperatorTx": "0x37ba4a72f448f6883a6fe65b1a8a05420061070c9056468ee3f6423e4e0a795d",
+  "createEscrowTx": "0x9a7fb67de14800f2fea0e2d515a86ad2b299f0a50424f36e7edb135d5adfe329",
+  "releaseTx": "0x7ebab6ace5a1ba6433d71f3de84be82870c77728c7ae8de90d9e38405e654450",
+  "buyerBalanceAfterEscrow": "750",
+  "timestamp": "2026-05-09T09:04:00.003Z",
+  "etherscan": {
+    "token": "https://sepolia.etherscan.io/address/0x4d203DaE3bA141f4D9560B3405EE184184037E5e",
+    "escrow": "https://sepolia.etherscan.io/address/0x494fa276C041f88a1b62723dE9bCD00e3C6E0614",
+    "tokenDeploy": "https://sepolia.etherscan.io/tx/0x8804ff41a87486670d7e3cd5d7125dc3d43f8b8c01d75b21f39ea2fea64f25bc",
+    "escrowDeploy": "https://sepolia.etherscan.io/tx/0xfc6727e6331c15f8d21acc80a9400a308025480a07af82f237aa72fb8a9aaf15",
+    "mint": "https://sepolia.etherscan.io/tx/0x57378addf118f87c0e49f6a39580cd84965eba3bbd356d6944ab855bc8d764bc",
+    "setOperator": "https://sepolia.etherscan.io/tx/0x37ba4a72f448f6883a6fe65b1a8a05420061070c9056468ee3f6423e4e0a795d",
+    "createEscrow": "https://sepolia.etherscan.io/tx/0x9a7fb67de14800f2fea0e2d515a86ad2b299f0a50424f36e7edb135d5adfe329",
+    "release": "https://sepolia.etherscan.io/tx/0x7ebab6ace5a1ba6433d71f3de84be82870c77728c7ae8de90d9e38405e654450"
+  },
+  "status": "PASS"
+}

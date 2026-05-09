@@ -1,0 +1,25 @@
+{
+  "template": "templates/blind-auction.sol",
+  "contract": "BlindAuction",
+  "address": "0x1945153F4481285048dE81b7b4056920d24f1141",
+  "owner": "0xF505e2E71df58D7244189072008f25f6b6aaE5ae",
+  "bidder": "0xbC2E5DFed4029C9e687975cB8c2a4b1cC5Fa1471",
+  "deployTx": "0x97ce7e3b9f04a48380e910d663640c52080466086ace9d2dfa85898bf6596d35",
+  "fundBidderTx": "0x20fb376be4be05f441947ba8a3b8d4131b0238f1437486572106bd0657f9b8a4",
+  "bidTx": "0xfb8660211c5535af39c92ada2bbe4057189a352f812a92849fe43832125a7a03",
+  "endAuctionTx": "0xc8f049353fde3c37ce1224c27ae0bc3664d0cda24508689e1b7bddb254b8d34a",
+  "revealWinnerTx": "0x23e0a06148e108b9daaffc860d0141075d87fb5fd49188b2fd5f42fae966e1fa",
+  "revealedHighestBid": "7777",
+  "revealedHighestBidder": "0xbC2E5DFed4029C9e687975cB8c2a4b1cC5Fa1471",
+  "bidHandle": "0x4dccc550fe396bb93e6f7d4140a4c008eca8f35f89ff0000000000aa36a70500",
+  "bidderHandle": "0xd5497881812876d3e2e56bb4b310c12284d93c70f0ff0000000000aa36a70700",
+  "timestamp": "2026-05-09T07:34:48.482Z",
+  "etherscan": {
+    "contract": "https://sepolia.etherscan.io/address/0x1945153F4481285048dE81b7b4056920d24f1141",
+    "deploy": "https://sepolia.etherscan.io/tx/0x97ce7e3b9f04a48380e910d663640c52080466086ace9d2dfa85898bf6596d35",
+    "bid": "https://sepolia.etherscan.io/tx/0xfb8660211c5535af39c92ada2bbe4057189a352f812a92849fe43832125a7a03",
+    "endAuction": "https://sepolia.etherscan.io/tx/0xc8f049353fde3c37ce1224c27ae0bc3664d0cda24508689e1b7bddb254b8d34a",
+    "revealWinner": "https://sepolia.etherscan.io/tx/0x23e0a06148e108b9daaffc860d0141075d87fb5fd49188b2fd5f42fae966e1fa"
+  },
+  "status": "PASS"
+}

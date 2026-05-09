@@ -1,0 +1,22 @@
+{
+  "template": "templates/encrypted-voting.sol",
+  "contract": "EncryptedVoting",
+  "address": "0x1719d9097aAbB9E37465Df93856565238360dC78",
+  "deployTx": "0x3716712a090e712f7f8a121aa93c1f1fb155d47b4a0ec224f07857c20a7ba35c",
+  "voteTx": "0x98ab1fd23eaad1e8a7bd48c144d52420f980840164e3b7f014390a281333bca2",
+  "endVotingTx": "0xc90fd69db7be7f8a6c1bbf184e765dd85492c9bfe03d665ef547a4d02bb57f0d",
+  "revealResultsTx": "0x927ac7ef6105d19cfaf677054728e2acb52f30b04e49757801947cad522e6911",
+  "revealedYes": "1",
+  "revealedNo": "0",
+  "yesHandle": "0x85cc527020547988bb8d4582b1bfe5fd94fadc5a9eff0000000000aa36a70500",
+  "noHandle": "0x22531669ea18ba3d2879e469cd52a41b96e86e74cbff0000000000aa36a70500",
+  "timestamp": "2026-05-09T07:30:12.182Z",
+  "etherscan": {
+    "contract": "https://sepolia.etherscan.io/address/0x1719d9097aAbB9E37465Df93856565238360dC78",
+    "deploy": "https://sepolia.etherscan.io/tx/0x3716712a090e712f7f8a121aa93c1f1fb155d47b4a0ec224f07857c20a7ba35c",
+    "vote": "https://sepolia.etherscan.io/tx/0x98ab1fd23eaad1e8a7bd48c144d52420f980840164e3b7f014390a281333bca2",
+    "endVoting": "https://sepolia.etherscan.io/tx/0xc90fd69db7be7f8a6c1bbf184e765dd85492c9bfe03d665ef547a4d02bb57f0d",
+    "reveal": "https://sepolia.etherscan.io/tx/0x927ac7ef6105d19cfaf677054728e2acb52f30b04e49757801947cad522e6911"
+  },
+  "status": "PASS"
+}

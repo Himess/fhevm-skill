@@ -1,0 +1,22 @@
+{
+  "template": "templates/confidential-erc20.sol",
+  "contract": "ConfidentialToken",
+  "deployer": "0xF505e2E71df58D7244189072008f25f6b6aaE5ae",
+  "tokenAddress": "0xCf4C0B8000d3855FAE8ACcA2E0724575A3941C39",
+  "deployTx": "0xac2bc4c5f53a40b24fdb40cf05fe614aa423459173b2194924255dc0e882f715",
+  "mintTx": "0xdab06d84fd775f90b51c57ebbbb4552ef8c3fa1c6941dad4d6f240d47fe4fcb7",
+  "transferTx": "0xed2273426cf64c2a199aa998585ec4f04f8622f0018b03dc4368b74aae3b256d",
+  "setOperatorTx": "0xdd7b31c3fcc8b4a74a242f7d6557298699df4f9399ecb1efab1f6c411a12bc88",
+  "initialBalance": "1000",
+  "balanceAfterTransfer": "900",
+  "recipient": "0xdd626360Ddd5459Ecf86C2a5CC94FEC9318cf8ee",
+  "timestamp": "2026-05-09T07:24:00.720Z",
+  "etherscan": {
+    "token": "https://sepolia.etherscan.io/address/0xCf4C0B8000d3855FAE8ACcA2E0724575A3941C39",
+    "deploy": "https://sepolia.etherscan.io/tx/0xac2bc4c5f53a40b24fdb40cf05fe614aa423459173b2194924255dc0e882f715",
+    "mint": "https://sepolia.etherscan.io/tx/0xdab06d84fd775f90b51c57ebbbb4552ef8c3fa1c6941dad4d6f240d47fe4fcb7",
+    "transfer": "https://sepolia.etherscan.io/tx/0xed2273426cf64c2a199aa998585ec4f04f8622f0018b03dc4368b74aae3b256d",
+    "setOperator": "https://sepolia.etherscan.io/tx/0xdd7b31c3fcc8b4a74a242f7d6557298699df4f9399ecb1efab1f6c411a12bc88"
+  },
+  "status": "PASS"
+}

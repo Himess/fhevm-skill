@@ -1,0 +1,39 @@
+{
+  "template": "templates/cdp-vault.sol",
+  "contract": "ConfidentialCDPVault",
+  "collateralToken": "0x84E368735735d412FF16761638a2B893cfA6a997",
+  "vault": "0x5De5a1a9F2179EAF174f373825ca8d8E41b3E098",
+  "deployer": "0xF505e2E71df58D7244189072008f25f6b6aaE5ae",
+  "oraclePrice": "1",
+  "deposit": {
+    "amount": "100"
+  },
+  "borrow": {
+    "amount": "50",
+    "maxLTV": "60% (=> max 60)"
+  },
+  "revealedDebt": "50",
+  "isLiquidatable": false,
+  "collatDeployTx": "0x5a88685f53103c68c6ad53bb05d2cc176fa78868d830c2826251d4e5a5552fc9",
+  "vaultDeployTx": "0x6c9b2db39fc9f23b31e9e59fe7c22a9d7ca8804a081fd26a77750035d1fe97ef",
+  "mintTx": "0x3e370f415ede0c113216d277e558ff8b510878d83a10e4d52593c41802c997dd",
+  "setOperatorTx": "0x6ef5edf497d950ce91c5788bf6b232ba491bea8d6dc75d45a5b24ce03f2fef21",
+  "depositTx": "0x6816d40312d1a4b456a7f9141879c3d334a24926a8a01e9534abbf242b84d67d",
+  "borrowTx": "0x7fd71de9f14238f55f5e70ef671fb89e97e9133ca48c30289b99bc6c0408728b",
+  "requestLiqCheckTx": "0xb1a013f86eed3d56fc182ae8eaf5726f4b98ca19d8a0d12d6536ceba8b21cf62",
+  "confirmLiquidatableTx": "0x4c74c1eb7fb86ade6e04ad4bca5a0f0cbae241a708c742661d0ca5575e854722",
+  "flagHandle": "0x0e4fce58c575f12fa5e9f2e4756be4651c716fe4dbff0000000000aa36a70500",
+  "timestamp": "2026-05-09T08:13:24.815Z",
+  "etherscan": {
+    "collateralToken": "https://sepolia.etherscan.io/address/0x84E368735735d412FF16761638a2B893cfA6a997",
+    "vault": "https://sepolia.etherscan.io/address/0x5De5a1a9F2179EAF174f373825ca8d8E41b3E098",
+    "collatDeploy": "https://sepolia.etherscan.io/tx/0x5a88685f53103c68c6ad53bb05d2cc176fa78868d830c2826251d4e5a5552fc9",
+    "vaultDeploy": "https://sepolia.etherscan.io/tx/0x6c9b2db39fc9f23b31e9e59fe7c22a9d7ca8804a081fd26a77750035d1fe97ef",
+    "mint": "https://sepolia.etherscan.io/tx/0x3e370f415ede0c113216d277e558ff8b510878d83a10e4d52593c41802c997dd",
+    "deposit": "https://sepolia.etherscan.io/tx/0x6816d40312d1a4b456a7f9141879c3d334a24926a8a01e9534abbf242b84d67d",
+    "borrow": "https://sepolia.etherscan.io/tx/0x7fd71de9f14238f55f5e70ef671fb89e97e9133ca48c30289b99bc6c0408728b",
+    "requestLiqCheck": "https://sepolia.etherscan.io/tx/0xb1a013f86eed3d56fc182ae8eaf5726f4b98ca19d8a0d12d6536ceba8b21cf62",
+    "confirmLiquidatable": "https://sepolia.etherscan.io/tx/0x4c74c1eb7fb86ade6e04ad4bca5a0f0cbae241a708c742661d0ca5575e854722"
+  },
+  "status": "PASS"
+}
