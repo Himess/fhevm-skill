@@ -1,10 +1,18 @@
 // ────────────────────────────────────────────────────────────────────────────────
-// Gen-2 React dashboard — uses @zama-fhe/relayer-sdk/web (low-level, manual flow).
-// Choose this when you need fine-grained control, are integrating into an existing
-// codebase, or are building UI for non-ERC-7984 confidential contracts.
+// Foundational-SDK React dashboard — uses @zama-fhe/relayer-sdk/web@0.4.1
+// (the same SDK every Hardhat test uses internally).
 //
-// For NEW apps using ERC-7984 tokens, prefer the Gen-3 hook-based API:
+// Choose this when:
+//   • you need fine-grained control over encryption / decryption,
+//   • you're integrating into an existing codebase that already uses ethers v6,
+//   • you're building a UI for a NON-ERC-7984 contract (voting, auction,
+//     escrow, AMM, vault) — the Token API doesn't fit those.
+//
+// For NEW ERC-7984 token UIs, react-dashboard-v3.tsx is more ergonomic:
 //   → templates/react-dashboard-v3.tsx  (uses @zama-fhe/react-sdk + ZamaProvider)
+//
+// Both layers are first-class. The high-level Token API wraps THIS SDK
+// internally — neither is "deprecated".
 // ────────────────────────────────────────────────────────────────────────────────
 //
 // This file: example React dashboard for interacting with an ERC-7984 confidential token

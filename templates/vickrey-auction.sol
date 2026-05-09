@@ -192,16 +192,26 @@ contract VickreyAuction is ZamaEthereumConfig {
         state = AuctionState.Settled;
 
         // Winner's escrow = their full bid; refund = bid - clearingPrice.
-        // FHE.sub auto-coerces the plaintext rhs — no FHE.asEuint64 wrapper needed.
         //
         // Invariant: `_bids[winner] >= revealedClearingPrice`. The winner is the
         // top bidder (selected via chained FHE.gt in bid()), and clearingPrice =
-        // second-highest bid by construction. FHE.sub on FHEVM uses MODULAR
-        // arithmetic, NOT saturating — if the invariant ever broke, the result
-        // would silently underflow into a near-MAX_UINT64 refund. The
-        // protection comes from how `bid()` builds `_secondBid`, not from a
-        // runtime guard here.
-        euint64 refund = FHE.sub(_bids[msg.sender], revealedClearingPrice);
+        // second-highest bid by construction.
+        //
+        // FHE.sub uses MODULAR arithmetic — if the invariant ever broke (a
+        // future regression in the top-2 ranking logic, or a malformed reveal),
+        // a naked `FHE.sub` would silently underflow to a near-MAX_UINT64
+        // refund and drain the contract.
+        //
+        // Defense-in-depth: gate the refund behind `bid >= clearingPrice`.
+        // Under the invariant this is always true; if it ever fails, the
+        // refund collapses to 0 instead of leaking the pool.
+        euint64 winnerBid = _bids[msg.sender];
+        ebool   ok        = FHE.ge(winnerBid, revealedClearingPrice);
+        euint64 refund    = FHE.select(
+            ok,
+            FHE.sub(winnerBid, revealedClearingPrice),
+            FHE.asEuint64(0)
+        );
         FHE.allowThis(refund);
         FHE.allowTransient(refund, address(bidToken));
         bidToken.confidentialTransfer(msg.sender, refund);

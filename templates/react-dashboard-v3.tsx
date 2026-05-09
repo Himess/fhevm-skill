@@ -49,14 +49,19 @@ import {
   useIsWrapper,
 } from "@zama-fhe/react-sdk";
 
-const TOKEN_ADDRESS   = "0xYourConfidentialTokenAddress" as `0x${string}`;
+// Fill in your deployed token address before running. Left as `undefined` so
+// the dashboard short-circuits with a clear "configure first" message instead
+// of silently calling hooks with a garbage placeholder string.
+const TOKEN_ADDRESS: `0x${string}` | undefined = undefined;
+// Example (uncomment + fill in after deploy):
+// const TOKEN_ADDRESS: `0x${string}` | undefined = "0xYourConfidentialTokenAddress";
+
 // Required for shield/unshield (ERC-7984 wrapper). For a non-wrapper token,
 // leave this as `undefined` (the `ShieldUnshield` panel below short-circuits
 // when the address is falsy). For a wrapper, replace the placeholder with
-// the deployed wrapper address — but DO NOT leave the placeholder string in
-// production: it is truthy, so the short-circuit in `ShieldUnshield` will
-// allow the panel to render with garbage `wrapperAddress` passed to the
-// hooks. Either set a real address or `undefined`.
+// the deployed wrapper address — but DO NOT leave a placeholder string in
+// production: any truthy value bypasses the short-circuit and the hooks
+// receive garbage. Either set a real address or `undefined`.
 const WRAPPER_ADDRESS: `0x${string}` | undefined = undefined;
 // Example (uncomment + fill in):
 // const WRAPPER_ADDRESS: `0x${string}` | undefined = "0xYourWrapperContractAddress";
@@ -65,6 +70,15 @@ const WRAPPER_ADDRESS: `0x${string}` | undefined = undefined;
 
 export default function Dashboard() {
   const { address, isConnected } = useAccount();
+
+  if (!TOKEN_ADDRESS) {
+    return (
+      <div style={{ padding: 24 }}>
+        <h2>Configure first</h2>
+        <p>Set <code>TOKEN_ADDRESS</code> at the top of <code>react-dashboard-v3.tsx</code> to your deployed ERC-7984 token, then reload.</p>
+      </div>
+    );
+  }
 
   if (!isConnected) return <ConnectWallet />;
 
