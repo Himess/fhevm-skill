@@ -6,6 +6,19 @@
 //   - confidentialBalanceOf  (NOT balanceOf)
 //   - setOperator(address, uint48 until)  (NOT approve(address, amount))
 //
+// ⚠ ERC-7984 has OVERLOADED method names — both `confidentialTransfer` (and
+// `confidentialTransferFrom`) come in TWO overloads (encrypted-input + already-
+// validated handle). ethers.js cannot disambiguate by argument count alone, so
+// when you have both overloads in the ABI you MUST use the typed selector
+// string syntax:
+//
+//   await contract["confidentialTransfer(address,bytes32,bytes)"](recipient, encHandle, inputProof);
+//   await contract["confidentialTransfer(address,uint256)"](recipient, internalHandle);
+//
+// Calling `contract.confidentialTransfer(...)` directly will throw
+// `TypeError: ambiguous function description` even when your arguments
+// uniquely match one overload.
+//
 // For a NON-ERC-7984 custom FHE token (e.g., one you wrote with ERC-20-style names), see
 // the alternative test patterns inside this skill's references/testing-guide.md.
 

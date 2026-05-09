@@ -402,6 +402,60 @@ function finalizeUnwrap(
 }
 ```
 
+## Snapshotting Handles for Long-Lived Reveals
+
+Generalises the unwrap pattern above. Whenever you have an **encrypted aggregate that mutates between request and finalize** (running tally, max-of-N, monthly volume, all-time-highest, leaderboard top-K), you MUST capture the handle at request time and use the captured handle in the on-chain verifier — not the storage value at finalize time.
+
+**Why:** every FHE op produces a fresh handle. If a user action mutates the aggregate during the seconds-long KMS roundtrip, the storage handle is now different from the one the KMS signed. `FHE.checkSignatures` reverts with a signature mismatch.
+
+```solidity
+contract MonthlyReveal is ZamaEthereumConfig {
+    euint64 private _monthlyTotal;        // mutates on every contribution()
+    bytes32 private _pendingRevealHandle; // captured at request time
+    uint64  public  revealedTotal;
+
+    /// Anyone (or owner-only, depending on policy) starts a reveal.
+    /// CRITICAL: snapshot the current handle BEFORE the KMS roundtrip,
+    /// so `finalizeReveal` can verify against the same one the KMS saw.
+    function requestReveal() external {
+        FHE.makePubliclyDecryptable(_monthlyTotal);
+        _pendingRevealHandle = FHE.toBytes32(_monthlyTotal);
+    }
+
+    /// Anyone calls with the KMS-signed cleartext + proof. We verify
+    /// against the SNAPSHOTTED handle, not against `_monthlyTotal`
+    /// (which may have moved on if a contribution() landed in between).
+    function finalizeReveal(
+        bytes calldata abiEncodedCleartexts,
+        bytes calldata decryptionProof
+    ) external {
+        require(_pendingRevealHandle != bytes32(0), "no reveal pending");
+
+        bytes32[] memory handles = new bytes32[](1);
+        handles[0] = _pendingRevealHandle;             // ← snapshotted, not live
+        FHE.checkSignatures(handles, abiEncodedCleartexts, decryptionProof);
+
+        revealedTotal = uint64(abi.decode(abiEncodedCleartexts, (uint256)));
+        _pendingRevealHandle = bytes32(0);             // clear so a stale finalize can't re-fire
+    }
+
+    /// User contribution that mutates the aggregate. This is what would
+    /// otherwise rewrite the handle out from under the KMS roundtrip.
+    function contribute(externalEuint64 enc, bytes calldata proof) external {
+        euint64 amount = FHE.fromExternal(enc, proof);
+        _monthlyTotal = FHE.add(_monthlyTotal, amount);
+        FHE.allowThis(_monthlyTotal);
+        // No re-grant of public-decryptability needed — the captured
+        // handle in _pendingRevealHandle still points to the prior value
+        // and its KMS signature is unaffected.
+    }
+}
+```
+
+The async-unwrap pattern above is the same shape (`requestId → burntHandle` mapping). The general rule: **never re-derive a handle at finalize time; always store the bytes32 you captured when you asked the KMS to sign it.** Multi-handle reveals work the same way — store an array of bytes32 keyed by request id.
+
+If your contract supports concurrent in-flight reveals (e.g. a leaderboard reveal that races with monthly tallies), key the snapshot by `requestId` instead of using a single `_pendingRevealHandle` slot — see the unwrap recipe above for the canonical `mapping(uint256 => bytes32)` form.
+
 ## Decryption Limits
 
 - **2048-bit limit**: A single decryption request cannot exceed 2048 bits total across all handles.

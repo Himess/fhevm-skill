@@ -167,6 +167,7 @@ If you just generated code containing any of these, STOP and fix:
 | `npm install hardhat` (gets v3) | Use `npm install hardhat@^2.22.0` — FHEVM plugin requires Hardhat 2 |
 | `npm install hardhat-deploy` + `import "hardhat-deploy"` in config | Crashes with `TypeError: Cannot read 'JsonRpcSigner' of undefined` (zksync-web3 × ethers v6). Drop the import unless you actually need deploy scripts. Templates ship with it commented out. |
 | `npm install @nomicfoundation/hardhat-ethers` (gets v4) | Use `@nomicfoundation/hardhat-ethers@^3.1.3` — v4 requires Hardhat 3 |
+| `npm install @nomicfoundation/hardhat-verify` (gets v3) | Use `@nomicfoundation/hardhat-verify@^2.0.0` — v3 silently requires Hardhat 3 and the smoke compile fails with `Cannot find module '.../hardhat/config'`. Same Hardhat 2/3 split as `hardhat-ethers`. |
 | `npm install @typechain/hardhat` (alone) | Crashes with `Couldn't find ethers-v6`. Always pair with `@typechain/ethers-v6@^0.5.1` AND bare `typechain@^8.3.2` (peer dep, not auto-installed) — otherwise compile fails with `HH801: Plugin @typechain/hardhat requires the following dependencies to be installed: typechain`. |
 | `@zama-fhe/relayer-sdk@^0.4.1` (caret) | Use `@zama-fhe/relayer-sdk@0.4.1` (exact). Caret resolves to 0.4.3 → plugin 0.4.2 hard-fails with "Invalid relayer-sdk version. Expecting 0.4.1." |
 | `npm install @zama-fhe/relayer-sdk@0.4.1` without `--save-exact` | Silently writes `"^0.4.1"` to `package.json` despite the explicit version. Always pin with `npm install --save-exact @zama-fhe/relayer-sdk@0.4.1` so the caret never sneaks back in. |
@@ -203,6 +204,7 @@ If you just generated code containing any of these, STOP and fix:
    covers both Sepolia and Mainnet because they share the same coprocessor
    topology. Do NOT look for a `SepoliaConfig` Solidity contract; only the
    `ZamaEthereumConfig` abstract base exists in `@fhevm/solidity@0.11.x`.
+   *(There IS a JS export named `SepoliaConfig` in `@zama-fhe/relayer-sdk/{web,node}` — that's the off-chain SDK config object passed to `createInstance`, a different layer. See `references/frontend-integration.md`.)*
 3. Replace plaintext state variables with encrypted types (`uint256 balance` → `euint64 balance`)
 4. Replace `if/require` conditions with `FHE.select` patterns
 5. Add ACL calls after every state mutation
@@ -238,7 +240,7 @@ npm install --save-dev --legacy-peer-deps \
   @fhevm/solidity@^0.11.1 @fhevm/hardhat-plugin@^0.4.2 @fhevm/mock-utils@^0.4.2 \
   encrypted-types@^0.0.4 \
   @nomicfoundation/hardhat-chai-matchers@^2.1.0 @nomicfoundation/hardhat-ethers@^3.1.3 \
-  @nomicfoundation/hardhat-verify \
+  @nomicfoundation/hardhat-verify@^2.0.0 \
   @typechain/hardhat @typechain/ethers-v6@^0.5.1 typechain@^8.3.2 \
   ethers@^6.16.0 \
   @openzeppelin/contracts@^5.6.1 @openzeppelin/confidential-contracts@^0.4.0
@@ -251,7 +253,9 @@ npx hardhat compile  # MUST exit 0
 
 > **Critical version pins** (other versions silently break the toolchain):
 > - `@zama-fhe/relayer-sdk@0.4.1` — **exact, NOT caret**. Use `--save-exact` (step 1 above) or your `package.json` will say `^0.4.1` and a future `npm install` may resolve `0.4.3`, after which the plugin hard-fails: `Invalid @zama-fhe/relayer-sdk version. Expecting 0.4.1. Got 0.4.3 instead`.
+> - `@nomicfoundation/hardhat-verify@^2.0.0` — **the 2-series pin matters**. Without it, `npm install` resolves to `3.0.17+` whose `peerDep hardhat: ^3.4.0` silently requires Hardhat 3, breaking the smoke compile with `Error: Cannot find module '.../hardhat/config' ... Did you mean to import "hardhat/config.js"?`. Same Hardhat 2/3 split trap as `hardhat-ethers`.
 > - `@typechain/ethers-v6@^0.5.1` AND `typechain@^8.3.2` — both required. `@typechain/hardhat` has `typechain` as a peer dep that npm does not auto-install. Without `@typechain/ethers-v6`: `Couldn't find ethers-v6`. Without bare `typechain`: `HH801: Plugin @typechain/hardhat requires the following dependencies to be installed: typechain`.
+> - `encrypted-types@^0.0.4` — transitive peer dep surfaced explicitly so newer plugin versions resolve cleanly. You don't import it directly; safe to keep, no direct usage in your code.
 > - `hardhat-deploy` is **NOT installed by default**. It transitively pulls `zksync-web3@0.14.4`, which crashes on ethers v6 at module load with `Cannot read 'JsonRpcSigner' of undefined`. Only install it if you need named-account deployment scripts, and pin a version compatible with your ethers major.
 > - **Smoke test:** run `npx hardhat compile` in an empty project right after install. If this fails, fix the install before writing any contracts.
 
