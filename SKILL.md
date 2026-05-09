@@ -91,13 +91,13 @@ Gateway Chain ──── orchestrates ──────► KMS (Key Managemen
 - Decryption is **asynchronous** — mark a value as decryptable, then verify the KMS proof separately
 - The FHE key is **never held by a single entity** — threshold security via KMS
 
-## Three SDK Generations — Pick the Right One
+## Picking the Right SDK Layer
 
-Two Solidity-side generations and three frontend-SDK generations exist. **Always use the NEWEST tier**, except in the explicit cases below where the middle tier is still correct.
+Solidity has one current library (`@fhevm/solidity`); the off-chain stack has two layers, both first-class but for different jobs.
 
 ### Solidity (on-chain)
 
-| | OLD (deprecated) | NEW (use this) |
+| | OLD (deprecated) | CURRENT (use this) |
 |---|---|---|
 | **Package** | `fhevm` v0.5-0.6 | `@fhevm/solidity` v0.11+ |
 | **Library** | `TFHE` | `FHE` |
@@ -109,33 +109,35 @@ Two Solidity-side generations and three frontend-SDK generations exist. **Always
 
 > **Warning**: `fhevm-contracts` was **archived in 2025** and used the OLD `TFHE` library. It has been replaced by `@openzeppelin/confidential-contracts` which uses the new `FHE` library. Use the new package for all development.
 
-### Frontend (off-chain)
+### Off-chain (tests + frontends)
 
-| Generation | Package | Status (2026) | When to use |
+Two layers cooperate — pick by the job, not by "which is newer". The high-level layer is built on top of the foundational layer; they aren't substitutes.
+
+| Layer | Package | Use it for | Don't use for |
 |---|---|---|---|
-| **Gen-1** | `fhevmjs` | **Deprecated** — do not use | Never (lint flags AP-013) |
-| **Gen-2** | `@zama-fhe/relayer-sdk@0.4.x` | Maintained | Hardhat tests (paired with `@fhevm/hardhat-plugin@0.4.2`); custom non-token contracts; manual encryption pipelines |
-| **Gen-3** | `@zama-fhe/sdk@3.x` + `@zama-fhe/react-sdk@3.x` | **Current default** (Apr 2026) | New apps, ERC-7984 token UIs, browser/Node, React (with `@tanstack/react-query`) |
+| **Foundational SDK** | `@zama-fhe/relayer-sdk@0.4.1` (EXACT pin) | Every Hardhat test (the plugin imports it internally), server-side scripts, frontends for non-token contracts (voting / auction / AMM / vault UIs), manual encryption pipelines | Token UIs where the high-level layer is more ergonomic |
+| **High-level Token API** | `@zama-fhe/sdk@3.x` + `@zama-fhe/react-sdk@3.x` | ERC-7984 token UIs in the browser (balances, transfers, wraps, operator setup), React apps wanting `useConfidentialBalance` / `useConfidentialTransfer` hooks | Hardhat tests, non-token contracts, server-side encryption |
+| **Deprecated** | `fhevmjs` | Never. Migration table below. | — |
 
-**Rule of thumb:** Gen-3 in the browser, Gen-2 in Hardhat tests. Mixing inside one app is fine — they're independent.
+**Rule of thumb:** The foundational SDK is mandatory at the test layer (the hardhat-plugin pins it). Add the high-level Token API on top whenever you build a token UI. They're independent and can coexist in one app.
 
-See **[references/sdk-v3-guide.md](references/sdk-v3-guide.md)** and **[references/react-sdk-guide.md](references/react-sdk-guide.md)** for the Gen-3 API. See **[references/frontend-integration.md](references/frontend-integration.md)** for Gen-2 patterns still relevant to tests.
+See **[references/sdk-v3-guide.md](references/sdk-v3-guide.md)** and **[references/react-sdk-guide.md](references/react-sdk-guide.md)** for the Token API. See **[references/frontend-integration.md](references/frontend-integration.md)** for the foundational SDK (which every test relies on).
 
 ### Migrating from `fhevmjs` (deprecated)
 
 If you have existing code using `fhevmjs`, migrate via this map. **Do NOT mix `fhevmjs` and the new SDK in the same project** — they target different protocol versions and will produce incompatible handles.
 
-| `fhevmjs` (Gen-1, deprecated) | NEW (use one of these instead) |
+| `fhevmjs` (deprecated) | CURRENT (use one of these instead) |
 |---|---|
-| `import { createInstance } from "fhevmjs"` | **Hardhat tests:** `import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk/web"` (Gen-2) |
-| `import { initFhevm } from "fhevmjs"` | **Browser/React app:** `import { ZamaSDK, RelayerWeb } from "@zama-fhe/sdk"` (Gen-3) |
-| `await createInstance({ chainId, publicKey })` | `await createInstance({ ...SepoliaConfig, network: provider })` (Gen-2) — addresses come from the config |
+| `import { createInstance } from "fhevmjs"` | **Hardhat tests:** `import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk/web"` (foundational SDK) |
+| `import { initFhevm } from "fhevmjs"` | **Browser/React token UI:** `import { ZamaSDK, RelayerWeb } from "@zama-fhe/sdk"` (high-level Token API) |
+| `await createInstance({ chainId, publicKey })` | `await createInstance({ ...SepoliaConfig, network: provider })` — addresses come from the config |
 | `instance.encrypt8/16/32/64(value)` | `instance.createEncryptedInput(addr, user).add8/16/32/64(value).encrypt()` |
-| `instance.generatePublicKey({ verifyingContract })` + manual reencrypt | `instance.userDecrypt(handles, ...)` (Gen-2) or the `useConfidentialBalance` hook (Gen-3) |
+| `instance.generatePublicKey({ verifyingContract })` + manual reencrypt | Foundational: `instance.userDecrypt(handles, ...)`. Token UIs: `useConfidentialBalance` hook |
 | `instance.decrypt(contractAddr, ciphertext)` | `instance.publicDecrypt([handle])` (only after `FHE.makePubliclyDecryptable` on-chain) |
 
 **Migration checklist:**
-1. `npm uninstall fhevmjs && npm install @zama-fhe/relayer-sdk@0.4.1` (or `@zama-fhe/sdk@3.x` + `@zama-fhe/react-sdk@3.x` for new browser apps)
+1. `npm uninstall fhevmjs && npm install --save-exact @zama-fhe/relayer-sdk@0.4.1` (foundational; mandatory for tests). For new browser token UIs, additionally `npm install @zama-fhe/sdk@3.x @zama-fhe/react-sdk@3.x`.
 2. Replace every `import { ... } from "fhevmjs"` with the right new import (see table above).
 3. Update Solidity contracts: replace `einput` with `externalEuintXX`, `TFHE.*` with `FHE.*`. See the Solidity migration table at the top of this section.
 4. Replace `Gateway.requestDecryption(...)` with `FHE.makePubliclyDecryptable(...)` + `FHE.checkSignatures(...)`.
@@ -628,6 +630,22 @@ Max per request: 32 × euint64, or 16 × euint128, or 256 × euint8. Total ≤ 2
 | `eaddress` | 160 | - | eq, ne | - | - |
 
 *`div` and `rem`: plaintext right-hand operand ONLY. Shift amounts are always `euint8`/`uint8`.
+
+## Known Limitations
+
+These are intrinsic constraints of the FHEVM stack you must design around — none of them have workarounds the skill is hiding from you.
+
+| Limitation | What it means in practice |
+|---|---|
+| **Sepolia only (no mainnet yet)** | FHEVM is testnet-only as of mid-2026. Production deploys land on Sepolia + ZAMA's gateway chain (10901). Mainnet support is a future Zama protocol milestone. |
+| **HCU per-tx 20 M / sequential depth 5 M** | Every FHE op consumes Homomorphic Compute Units. Long encrypted loops (e.g. eq-chains over many buckets) hit the budget. Plan with [`references/gas-optimization.md`](references/gas-optimization.md). |
+| **`FHE.div` / `FHE.rem`: plaintext divisor only** | Encrypted-by-encrypted division is unsupported. Either pre-divide off-chain or restructure the math (see common-pitfalls.md §3). |
+| **`euint256`: equality only** | No `gt/lt/ge/le/min/max/add/sub/mul`. Only `eq` / `ne`. Use `euint128` whenever you need ordering or arithmetic on big integers. |
+| **`view` / `pure` cannot use state-mutating FHE ops** | All FHE arithmetic / comparison / select / random ops touch coprocessor state. Read-only getters can return handles but cannot compute them. |
+| **ERC-7984 transfers silently return 0 on insufficient balance** | `confidentialTransfer` / `confidentialTransferFrom` never revert. **Always use the `euint64 transferred` return value, not the requested amount, for downstream computation.** Otherwise a caller with 0 balance can drain pools that compute outputs from the requested input. |
+| **Hardhat 2 only** | `@fhevm/hardhat-plugin@0.4.x` is incompatible with Hardhat 3. Pin `hardhat@^2.28.4`. |
+| **`@zama-fhe/relayer-sdk` exact pin** | The plugin hard-fails on `0.4.3`. Always `npm install --save-exact @zama-fhe/relayer-sdk@0.4.1`. See common-pitfalls.md §5b. |
+| **Input proofs bound to msg.sender** | A proof generated for user A cannot be forwarded by contract X to contract Y as if X were the sender. Use a 2-tx flow or re-encrypt. |
 
 ## Reference Files
 
