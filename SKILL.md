@@ -6,16 +6,22 @@ description: >-
   the user mentions FHEVM, fhEVM, FHE, encrypted types (euint8, euint64,
   ebool, eaddress), confidential smart contracts, homomorphic encryption,
   Zama protocol, encrypted balances, private transfers, or asks about
-  ERC-7984 confidential tokens. Also triggers when importing @fhevm/solidity,
-  fhevm-contracts, @zama-fhe/relayer-sdk, or when Solidity files contain
-  FHE.add, FHE.select, FHE.allow, FHE.fromExternal, or externalEuint types.
+  ERC-7984 confidential tokens. Also triggers when migrating away from the
+  deprecated fhevmjs package, or when importing @fhevm/solidity,
+  fhevm-contracts, fhevmjs, @zama-fhe/relayer-sdk, @zama-fhe/sdk, @zama-fhe/react-sdk,
+  ZamaSDK, ZamaProvider, useConfidentialBalance, useConfidentialTransfer,
+  createInstance, createEncryptedInput,
+  or when Solidity files contain
+  FHE.add, FHE.select, FHE.allow, FHE.fromExternal, externalEuint types,
+  TFHE.* (legacy), or einput parameters.
   Covers the full lifecycle: project setup, encrypted types and operations,
   ACL permissions, input proofs, decryption (user/public/delegated),
-  testing with Hardhat mock and Sepolia, frontend integration with Relayer SDK,
+  testing with Hardhat mock and Sepolia, frontend integration with both the
+  legacy Relayer SDK (Gen-2) and the new @zama-fhe/sdk + react-sdk (Gen-3),
   ERC-7984 token standard, gas optimization, and security hardening.
   Includes a validation script that catches common FHEVM mistakes before deployment.
 license: MIT
-version: "1.0.0"
+version: "1.1.0"
 compatibility:
   - claude-code
   - cursor
@@ -85,9 +91,11 @@ Gateway Chain ──── orchestrates ──────► KMS (Key Managemen
 - Decryption is **asynchronous** — mark a value as decryptable, then verify the KMS proof separately
 - The FHE key is **never held by a single entity** — threshold security via KMS
 
-## Two Library Generations — Use the NEW One
+## Three SDK Generations — Pick the Right One
 
-There are two incompatible Solidity libraries. **Always use the NEW system:**
+Two Solidity-side generations and three frontend-SDK generations exist. **Always use the NEWEST tier**, except in the explicit cases below where the middle tier is still correct.
+
+### Solidity (on-chain)
 
 | | OLD (deprecated) | NEW (use this) |
 |---|---|---|
@@ -98,9 +106,41 @@ There are two incompatible Solidity libraries. **Always use the NEW system:**
 | **Input parse** | `TFHE.asEuint64(einput, proof)` | `FHE.fromExternal(externalEuint64, proof)` |
 | **Config** | `SepoliaZamaFHEVMConfig` | `ZamaEthereumConfig` |
 | **Decryption** | `Gateway.requestDecryption()` | `FHE.makePubliclyDecryptable()` + `FHE.checkSignatures()` |
-| **Frontend SDK** | `fhevmjs` | `@zama-fhe/relayer-sdk` |
 
 > **Warning**: `fhevm-contracts` was **archived in 2025** and used the OLD `TFHE` library. It has been replaced by `@openzeppelin/confidential-contracts` which uses the new `FHE` library. Use the new package for all development.
+
+### Frontend (off-chain)
+
+| Generation | Package | Status (2026) | When to use |
+|---|---|---|---|
+| **Gen-1** | `fhevmjs` | **Deprecated** — do not use | Never (lint flags AP-013) |
+| **Gen-2** | `@zama-fhe/relayer-sdk@0.4.x` | Maintained | Hardhat tests (paired with `@fhevm/hardhat-plugin@0.4.2`); custom non-token contracts; manual encryption pipelines |
+| **Gen-3** | `@zama-fhe/sdk@3.x` + `@zama-fhe/react-sdk@3.x` | **Current default** (Apr 2026) | New apps, ERC-7984 token UIs, browser/Node, React (with `@tanstack/react-query`) |
+
+**Rule of thumb:** Gen-3 in the browser, Gen-2 in Hardhat tests. Mixing inside one app is fine — they're independent.
+
+See **[references/sdk-v3-guide.md](references/sdk-v3-guide.md)** and **[references/react-sdk-guide.md](references/react-sdk-guide.md)** for the Gen-3 API. See **[references/frontend-integration.md](references/frontend-integration.md)** for Gen-2 patterns still relevant to tests.
+
+### Migrating from `fhevmjs` (deprecated)
+
+If you have existing code using `fhevmjs`, migrate via this map. **Do NOT mix `fhevmjs` and the new SDK in the same project** — they target different protocol versions and will produce incompatible handles.
+
+| `fhevmjs` (Gen-1, deprecated) | NEW (use one of these instead) |
+|---|---|
+| `import { createInstance } from "fhevmjs"` | **Hardhat tests:** `import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk/web"` (Gen-2) |
+| `import { initFhevm } from "fhevmjs"` | **Browser/React app:** `import { ZamaSDK, RelayerWeb } from "@zama-fhe/sdk"` (Gen-3) |
+| `await createInstance({ chainId, publicKey })` | `await createInstance({ ...SepoliaConfig, network: provider })` (Gen-2) — addresses come from the config |
+| `instance.encrypt8/16/32/64(value)` | `instance.createEncryptedInput(addr, user).add8/16/32/64(value).encrypt()` |
+| `instance.generatePublicKey({ verifyingContract })` + manual reencrypt | `instance.userDecrypt(handles, ...)` (Gen-2) or the `useConfidentialBalance` hook (Gen-3) |
+| `instance.decrypt(contractAddr, ciphertext)` | `instance.publicDecrypt([handle])` (only after `FHE.makePubliclyDecryptable` on-chain) |
+
+**Migration checklist:**
+1. `npm uninstall fhevmjs && npm install @zama-fhe/relayer-sdk@0.4.1` (or `@zama-fhe/sdk@3.x` + `@zama-fhe/react-sdk@3.x` for new browser apps)
+2. Replace every `import { ... } from "fhevmjs"` with the right new import (see table above).
+3. Update Solidity contracts: replace `einput` with `externalEuintXX`, `TFHE.*` with `FHE.*`. See the Solidity migration table at the top of this section.
+4. Replace `Gateway.requestDecryption(...)` with `FHE.makePubliclyDecryptable(...)` + `FHE.checkSignatures(...)`.
+5. Run `scripts/validate-fhevm.sh` against `contracts/` to catch any leftover legacy patterns.
+6. Run `npx hardhat test` — every test must still pass.
 
 ### Self-Correction Table
 
@@ -108,19 +148,26 @@ If you just generated code containing any of these, STOP and fix:
 
 | If you wrote... | You meant... |
 |---|---|
-| `TFHE.asEuint64(input, proof)` | `FHE.fromExternal(externalEuint64, proof)` |
-| `einput` parameter type | `externalEuint64` (or typed variant) |
+| `TFHE.asEuint64(input, proof)` | `FHE.fromExternal(encInput, proof)` — where `encInput` has type `externalEuint64`. (`externalEuint64` is the **parameter type**, not a value: `function deposit(externalEuint64 encInput, bytes calldata proof) { euint64 amount = FHE.fromExternal(encInput, proof); ... }`) |
+| `einput` parameter type | `externalEuint64` (or `externalEuintN` / `externalEbool` / `externalEaddress`) |
 | `Gateway.requestDecryption()` | `FHE.makePubliclyDecryptable()` + `checkSignatures` |
 | `import "fhevm/lib/TFHE.sol"` | `import {FHE} from "@fhevm/solidity/lib/FHE.sol"` |
 | `SepoliaZamaFHEVMConfig` | `ZamaEthereumConfig` |
-| `fhevmjs` package | `@zama-fhe/relayer-sdk` |
+| `fhevmjs` package | `@zama-fhe/sdk` (browser/React) or `@zama-fhe/relayer-sdk` (Hardhat tests) |
+| `import { createInstance } from "fhevmjs"` | `import { ZamaSDK, RelayerWeb } from "@zama-fhe/sdk"` |
+| `instance.createEncryptedInput(...).add64(n).encrypt()` in app code | `await token.confidentialTransfer(to, amount)` via `sdk.createToken(addr)` |
+| Hand-rolled EIP-712 for user decryption in React | `useConfidentialBalance({ tokenAddress })` from `@zama-fhe/react-sdk` |
+| `<ZamaProvider>` outside `<QueryClientProvider>` | Provider order: `WagmiProvider` → `QueryClientProvider` → `ZamaProvider` |
 | `FHE.decrypt(value)` in Solidity | No in-contract decrypt. Use Relayer SDK off-chain |
 | `ebytes64` or `eint8` | These types don't exist. Use `euint64` or `ebool` |
 | `FHE.div(a, encryptedB)` | Divisor must be plaintext: `FHE.div(a, uint64(b))` |
 | `FHE.safeAdd()` / `safeSub()` | Don't exist. All arithmetic wraps silently |
 | `npm install hardhat` (gets v3) | Use `npm install hardhat@^2.22.0` — FHEVM plugin requires Hardhat 2 |
-| `npm install hardhat-deploy` (gets v2) | Use `hardhat-deploy@^0.11.45` — v2 is incompatible with Hardhat 2 |
+| `npm install hardhat-deploy` + `import "hardhat-deploy"` in config | Crashes with `TypeError: Cannot read 'JsonRpcSigner' of undefined` (zksync-web3 × ethers v6). Drop the import unless you actually need deploy scripts. Templates ship with it commented out. |
 | `npm install @nomicfoundation/hardhat-ethers` (gets v4) | Use `@nomicfoundation/hardhat-ethers@^3.1.3` — v4 requires Hardhat 3 |
+| `npm install @typechain/hardhat` (alone) | Crashes with `Couldn't find ethers-v6`. Always pair with `@typechain/ethers-v6@^0.5.1` AND bare `typechain@^8.3.2` (peer dep, not auto-installed) — otherwise compile fails with `HH801: Plugin @typechain/hardhat requires the following dependencies to be installed: typechain`. |
+| `@zama-fhe/relayer-sdk@^0.4.1` (caret) | Use `@zama-fhe/relayer-sdk@0.4.1` (exact). Caret resolves to 0.4.3 → plugin 0.4.2 hard-fails with "Invalid relayer-sdk version. Expecting 0.4.1." |
+| `npm install @zama-fhe/relayer-sdk@0.4.1` without `--save-exact` | Silently writes `"^0.4.1"` to `package.json` despite the explicit version. Always pin with `npm install --save-exact @zama-fhe/relayer-sdk@0.4.1` so the caret never sneaks back in. |
 | `abi.decode(cleartexts, (uint64))` | SDK encodes as `uint256`: use `abi.decode(cleartexts, (uint256))` then cast |
 | `FHE.randEuint64(100)` | upperBound must be power of 2: `FHE.randEuint64(128)` then `FHE.rem(r, 100)` |
 
@@ -146,7 +193,14 @@ If you just generated code containing any of these, STOP and fix:
 **When a user asks to add FHE to an existing contract:**
 
 1. Add `@fhevm/solidity` dependency
-2. Inherit `ZamaEthereumConfig`
+2. Inherit `ZamaEthereumConfig` — **mandatory**. This abstract contract's
+   constructor calls `FHE.setCoprocessor(...)` with the canonical Ethereum
+   mainnet + Sepolia coprocessor address. **Without it, every `FHE.*` call
+   reverts** with "coprocessor not initialized" (the coprocessor address is
+   `address(0)` by default). One contract, one inheritance — `ZamaEthereumConfig`
+   covers both Sepolia and Mainnet because they share the same coprocessor
+   topology. Do NOT look for a `SepoliaConfig` Solidity contract; only the
+   `ZamaEthereumConfig` abstract base exists in `@fhevm/solidity@0.11.x`.
 3. Replace plaintext state variables with encrypted types (`uint256 balance` → `euint64 balance`)
 4. Replace `if/require` conditions with `FHE.select` patterns
 5. Add ACL calls after every state mutation
@@ -165,17 +219,53 @@ npm install @openzeppelin/contracts@^5.6.1
 npm install @openzeppelin/confidential-contracts@^0.4.0
 ```
 
-Key deps: `@fhevm/solidity` ^0.11.1, `@fhevm/hardhat-plugin` ^0.4.2, `@zama-fhe/relayer-sdk` ^0.4.1.
+Key deps: `@fhevm/solidity` ^0.11.1, `@fhevm/hardhat-plugin` ^0.4.2, `@zama-fhe/relayer-sdk` **EXACT 0.4.1** (no caret), `@typechain/hardhat` + `@typechain/ethers-v6`.
 
 **CRITICAL**: Use **Hardhat 2** (^2.22.0), NOT Hardhat 3. The `@fhevm/hardhat-plugin` is incompatible with Hardhat 3. If setting up from scratch instead of cloning the template:
 
 ```bash
-npm install --save-dev hardhat@^2.28.4 @fhevm/solidity@^0.11.1 @fhevm/hardhat-plugin@^0.4.2 @fhevm/mock-utils@^0.4.2 @zama-fhe/relayer-sdk@^0.4.1 encrypted-types@^0.0.4 @nomicfoundation/hardhat-chai-matchers@^2.1.0 @nomicfoundation/hardhat-ethers @nomicfoundation/hardhat-verify @typechain/hardhat hardhat-deploy@^0.11.45 ethers @openzeppelin/contracts@^5.6.1 @openzeppelin/confidential-contracts@^0.4.0
+# Two-step install. Step 1 uses --save-exact so that @zama-fhe/relayer-sdk
+# lands as exactly "0.4.1" in package.json (default `npm install x@0.4.1`
+# silently writes "^0.4.1" which can later resolve to 0.4.3 → plugin breaks).
+npm install --save-dev --save-exact --legacy-peer-deps \
+  @zama-fhe/relayer-sdk@0.4.1
+
+# Step 2: everything else (carets are fine here).
+npm install --save-dev --legacy-peer-deps \
+  hardhat@^2.28.4 \
+  @fhevm/solidity@^0.11.1 @fhevm/hardhat-plugin@^0.4.2 @fhevm/mock-utils@^0.4.2 \
+  encrypted-types@^0.0.4 \
+  @nomicfoundation/hardhat-chai-matchers@^2.1.0 @nomicfoundation/hardhat-ethers@^3.1.3 \
+  @nomicfoundation/hardhat-verify \
+  @typechain/hardhat @typechain/ethers-v6@^0.5.1 typechain@^8.3.2 \
+  ethers@^6.16.0 \
+  @openzeppelin/contracts@^5.6.1 @openzeppelin/confidential-contracts@^0.4.0
+
+# Smoke test BEFORE writing any contracts — catches the most common install issues.
+npx hardhat init    # if no project yet, otherwise skip
+echo > contracts/Smoke.sol  # any minimal .sol file
+npx hardhat compile  # MUST exit 0
 ```
 
-> **These are the exact same versions Zama uses in fhevm-hardhat-template.** Use `hardhat@^2.28.4` (Hardhat 2, NOT 3). The `@fhevm/hardhat-plugin` is incompatible with Hardhat 3.
+> **Critical version pins** (other versions silently break the toolchain):
+> - `@zama-fhe/relayer-sdk@0.4.1` — **exact, NOT caret**. Use `--save-exact` (step 1 above) or your `package.json` will say `^0.4.1` and a future `npm install` may resolve `0.4.3`, after which the plugin hard-fails: `Invalid @zama-fhe/relayer-sdk version. Expecting 0.4.1. Got 0.4.3 instead`.
+> - `@typechain/ethers-v6@^0.5.1` AND `typechain@^8.3.2` — both required. `@typechain/hardhat` has `typechain` as a peer dep that npm does not auto-install. Without `@typechain/ethers-v6`: `Couldn't find ethers-v6`. Without bare `typechain`: `HH801: Plugin @typechain/hardhat requires the following dependencies to be installed: typechain`.
+> - `hardhat-deploy` is **NOT installed by default**. It transitively pulls `zksync-web3@0.14.4`, which crashes on ethers v6 at module load with `Cannot read 'JsonRpcSigner' of undefined`. Only install it if you need named-account deployment scripts, and pin a version compatible with your ethers major.
+> - **Smoke test:** run `npx hardhat compile` in an empty project right after install. If this fails, fix the install before writing any contracts.
 
 Config must set `evmVersion: "cancun"` and `viaIR: true` (avoids stack-too-deep in complex FHE contracts).
+
+#### ERC-7984 operator setup (replaces ERC-20 `approve`)
+
+If your contract calls `confidentialTransferFrom(user, …)`, the user must FIRST authorize your contract as an operator on the token (one tx, separate from the actual call):
+
+```solidity
+// User-side, separate transaction:
+token.setOperator(myContract, uint48(block.timestamp + 1 days));  // expiry = "until" timestamp
+// Now myContract can call token.confidentialTransferFrom(user, ...) until that timestamp.
+```
+
+This is the ERC-7984 equivalent of `approve(spender, amount)` — but **time-based**, not amount-based. To revoke: `setOperator(spender, 0)`.
 
 ### Sepolia Deployment
 
@@ -422,6 +512,19 @@ contract MyToken is ZamaEthereumConfig, ERC7984, Ownable2Step {
 
 See **[references/erc7984-guide.md](references/erc7984-guide.md)** for complete interface, operator model, wrap/unwrap, extensions, and cross-contract patterns.
 
+### Privileged-Role Pattern Selection
+
+Most FHEVM contracts need an admin role (mint, end auction, settle, slash, etc.). Pick by lifecycle:
+
+| Use case | Pattern | Why |
+|---|---|---|
+| One-time deploy admin, never changes | `address public immutable owner` + `if (msg.sender != owner) revert NotOwner();` | Cheapest, no transfer surface, no `Ownable` 2-tx ownership-handoff confusion |
+| Rotatable admin (production tokens, DAOs) | `Ownable2Step` from `@openzeppelin/contracts/access/Ownable2Step.sol` | Two-step transfer prevents typo'd owner = locked contract |
+| Multiple roles (minter / pauser / treasurer) | `AccessControl` from `@openzeppelin/contracts` | Granular, on-chain visible role members |
+| Critical mainnet (slashing, > $100k TVL) | Multisig (Safe / Gnosis) as the owner of `Ownable2Step` | Operational checks-and-balances, recovery from key loss |
+
+See **[references/security-checklist.md](references/security-checklist.md)** for the full table with code examples.
+
 ## Critical Anti-Patterns
 
 ### 1. Branching on encrypted values [CRITICAL — leaks confidential data]
@@ -465,9 +568,9 @@ euint64 actual = FHE.select(sufficient, amount, FHE.asEuint64(0));
 
 Random generation mutates on-chain PRNG state. Must be a state-changing function.
 
-### 6. Bounded random with non-power-of-2 [HIGH — undefined behavior]
+### 6. Bounded random with non-power-of-2 [HIGH — runtime revert]
 
-`FHE.randEuint8(6)` is wrong. Use `FHE.randEuint8(8)` (power of 2), then `FHE.rem(result, uint8(6))`.
+`FHE.randEuint8(6)` reverts at runtime ("upperBound must be a power of 2"). Use `FHE.randEuint8(8)` (power of 2), then `FHE.rem(result, uint8(6))` to project into [0, 6).
 
 ### 7. Deprecated TFHE library for new contracts [HIGH — wrong API]
 
@@ -501,7 +604,7 @@ Max per request: 32 × euint64, or 16 × euint128, or 256 × euint8. Total ≤ 2
 
 ## Battle Scars (Real-World Lessons)
 
-1. **"Why did 0 tokens arrive?"**: We deployed a confidential ERC-20 and tested a transfer of 1000 tokens from an account with 500. No revert, no error, transaction succeeded. The recipient got 0. We spent hours debugging before realizing: FHE transfers NEVER revert on insufficient balance. The `select` pattern quietly chose 0. **Detection trick**: compare the sender's balance handle before and after — if unchanged, the transfer silently failed.
+1. **"Why did 0 tokens arrive?"**: We deployed a confidential ERC-20 and tested a transfer of 1000 tokens from an account with 500. No revert, no error, transaction succeeded. The recipient got 0. We spent hours debugging before realizing: confidential transfers (ERC-7984 and any sound FHE token) NEVER revert on insufficient balance — the `select(ge(balance, amount), amount, 0)` pattern quietly substitutes 0 to avoid leaking the balance. **Detection**: comparing handles before/after does **not** work — every FHE op produces a fresh non-deterministic ciphertext, so handles always change. Real detection requires (a) decrypting the recipient's balance and verifying it grew by `amount`, or (b) parsing the `ConfidentialTransfer` event's `amount` handle and decrypting that.
 
 2. **"Why does the proof fail cross-contract?"**: Our vault contract received an encrypted input from a user and forwarded it to a token contract via `confidentialTransferFrom`. Proof validation failed every time. Root cause: input proofs are bound to `msg.sender`. When the vault forwarded the call, `msg.sender` changed from user to vault. **Fix**: 2-transaction flow — user sends to token directly, then vault triggers logic separately.
 
@@ -535,24 +638,36 @@ For detailed guides, read the corresponding reference file:
 - **[Input Proofs](references/input-proofs.md)** — Client-side encryption, contract-side validation, multi-input proofs
 - **[Decryption Guide](references/decryption-guide.md)** — User decryption (EIP-712), public decryption, checkSignatures, delegated
 - **[Testing Guide](references/testing-guide.md)** — Mock mode, Sepolia testing, decrypt helpers, test patterns
-- **[Frontend Integration](references/frontend-integration.md)** — Relayer SDK setup, encryption, decryption, React patterns
+- **[Frontend Integration](references/frontend-integration.md)** — Gen-2 Relayer SDK setup, encryption, decryption, React patterns (still used in Hardhat tests)
+- **[SDK v3 Guide](references/sdk-v3-guide.md)** — Gen-3 `@zama-fhe/sdk@3.x` (NEW): `ZamaSDK`, `Token`, viem/ethers signers, RelayerWeb, IndexedDB cache, migration map
+- **[React SDK Guide](references/react-sdk-guide.md)** — Gen-3 `@zama-fhe/react-sdk@3.x` (NEW): `ZamaProvider`, `WagmiSigner`, `useConfidentialBalance`, `useConfidentialTransfer`, react-query integration
 - **[ERC-7984 Guide](references/erc7984-guide.md)** — Confidential tokens, wrap/unwrap, ConfidentialERC20, OpenZeppelin contracts
 - **[Common Pitfalls](references/common-pitfalls.md)** — Extended anti-patterns with explanations and battle scars
 - **[Gas Optimization](references/gas-optimization.md)** — FHE-specific gas patterns, type sizing, batching strategies
 - **[Security Checklist](references/security-checklist.md)** — Production security audit checklist for FHEVM contracts
+- **[Zama Upstream](references/zama-upstream.md)** — Pinned versions, upstream repo links, attribution, upgrade procedure when Zama ships breaking changes
 
 ## Templates
 
 - **[templates/confidential-erc20.sol](templates/confidential-erc20.sol)** — ERC-7984 confidential token with encrypted balances
-- **[templates/encrypted-voting.sol](templates/encrypted-voting.sol)** — Confidential voting with encrypted tallies
-- **[templates/blind-auction.sol](templates/blind-auction.sol)** — Sealed-bid auction with encrypted bids
+- **[templates/encrypted-voting.sol](templates/encrypted-voting.sol)** — Confidential yes/no voting with encrypted tallies
+- **[templates/multi-option-voting.sol](templates/multi-option-voting.sol)** — N-bucket (3-5) token-weighted DAO vote (FHE.eq+select chain, multi-input single-proof, dynamic-N reveal)
+- **[templates/blind-auction.sol](templates/blind-auction.sol)** — Sealed-bid auction with encrypted bids AND encrypted bidder identity (eaddress)
+- **[templates/vickrey-auction.sol](templates/vickrey-auction.sol)** — Sealed-bid SECOND-price (Vickrey) auction with ERC-7984 escrow, top-2 chained-`gt`+`select` ranking, mixed-type 2-handle reveal, 4-state lifecycle (Bidding→Ended→Revealed→Settled)
+- **[templates/confidential-amm.sol](templates/confidential-amm.sol)** — Single-pair constant-product AMM (encrypted reserves, plaintext LP supply, 0.3% fees, multiplicative-invariant gate with silent refund on caller-cheat, ACL-gated TVL reveal). Crystallises the design from `common-pitfalls.md` §11b.
+- **[templates/cdp-vault.sol](templates/cdp-vault.sol)** — Collateral-debt position vault (encrypted collateral/debt, plaintext oracle, public-decryptable liquidation flag with `checkSignatures` round-trip, Pitfall #11 mul-overflow mitigations: 60/100→3/5, 80/100→4/5)
 - **[templates/hardhat.config.ts](templates/hardhat.config.ts)** — Production-ready Hardhat configuration
-- **[templates/test-template.ts](templates/test-template.ts)** — Test boilerplate for custom FHE contracts
-- **[templates/test-erc7984-template.ts](templates/test-erc7984-template.ts)** — Test boilerplate for ERC-7984 tokens (operator model)
+- **[templates/test-template.ts](templates/test-template.ts)** — ERC-7984 test boilerplate matched to `templates/confidential-erc20.sol` (mint, confidentialTransfer, operator model, ACL)
+- **[templates/test-erc7984-template.ts](templates/test-erc7984-template.ts)** — Generic ERC-7984 test boilerplate using a fixture pattern
+- **[templates/test-multi-option-voting.ts](templates/test-multi-option-voting.ts)** — Full E2E test for the multi-option voting template (multi-input proof, dynamic-N publicDecrypt, winningChoice tie-break, out-of-range fall-through)
+- **[templates/test-vickrey-auction.ts](templates/test-vickrey-auction.ts)** — Full E2E test for the Vickrey auction (4-bidder top-2 ranking, winner-pays-second-price refund, seller withdraw, loser refunds, state-machine guards)
+- **[templates/test-confidential-amm.ts](templates/test-confidential-amm.ts)** — 16-test suite for the AMM (initialization, liquidity provision, A↔B swaps, cheating-trader silent refund, fee accumulation, TVL UX)
+- **[templates/test-cdp-vault.ts](templates/test-cdp-vault.ts)** — 22-test suite for the CDP vault (deposit, borrow at safe LTV, silent over-LTV cap, repay, full liquidation flow with `publicDecrypt` + `checkSignatures` + on-chain liquidate, withdraw with debt-gate, access control)
 - **[templates/confidential-escrow.sol](templates/confidential-escrow.sol)** — Escrow with encrypted deposits, release, refund, arbiter dispute
 - **[templates/confidential-swap.sol](templates/confidential-swap.sol)** — Token swap with encrypted amounts and fee collection
-- **[templates/react-dashboard.tsx](templates/react-dashboard.tsx)** — Complete React component: connect, decrypt balance, encrypted transfer
-- **[templates/deploy-template.ts](templates/deploy-template.ts)** — Hardhat-deploy script template
+- **[templates/react-dashboard.tsx](templates/react-dashboard.tsx)** — Gen-2 React component (legacy `relayer-sdk`): connect, decrypt balance, encrypted transfer
+- **[templates/react-dashboard-v3.tsx](templates/react-dashboard-v3.tsx)** — Gen-3 React component (NEW `@zama-fhe/react-sdk`): hooks-based balance, transfer, shield/unshield, with `<ZamaProvider>` setup
+- **[templates/deploy-template.ts](templates/deploy-template.ts)** — Plain-ethers deploy script (intentionally NOT `hardhat-deploy` — that package's transitive `zksync-web3@0.14.4` crashes on ethers v6; see Self-Correction Table)
 - **[templates/mock-erc20.sol](templates/mock-erc20.sol)** — Mock ERC-20 for testing wrap/unwrap flows
 
 ## Validation
