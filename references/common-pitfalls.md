@@ -205,6 +205,41 @@ if (after - before !== expectedAmount) throw new Error("silent partial transfer"
 
 Comparing handles before / after gives you no information.
 
+### 6b. The Underfunded-Caller Drain (Swap / AMM / DEX Pattern)
+
+**Severity**: Critical — drains pool reserves on contracts that look correct.
+
+This is a specific application of Pitfall #6 that bites every confidential-DEX template. `confidentialTransferFrom` returns the **amount actually transferred** (which is 0 if the caller is underfunded). Code that ignores this return value and uses the *requested* amount for the output computation is drainable:
+
+```solidity
+// ❌ DRAINABLE — caller with zero balance can extract pool reserves
+function swapAtoB(externalEuint64 encA, bytes calldata proof) external {
+    euint64 amountA = FHE.fromExternal(encA, proof);
+    euint64 amountB = FHE.div(FHE.mul(amountA, RATE_NUM), RATE_DEN); // ← from request
+    FHE.allowTransient(amountA, address(tokenA));
+    tokenA.confidentialTransferFrom(msg.sender, address(this), amountA); // ← return discarded
+    tokenB.confidentialTransfer(msg.sender, amountB); // ← pays full amountB even if pulled 0
+}
+
+// ✅ SAFE — output derived from the actual amount that was pulled in
+function swapAtoB(externalEuint64 encA, bytes calldata proof) external {
+    euint64 requested = FHE.fromExternal(encA, proof);
+    FHE.allowTransient(requested, address(tokenA));
+    euint64 actual = tokenA.confidentialTransferFrom(msg.sender, address(this), requested);
+    FHE.allowThis(actual);
+    euint64 amountB = FHE.div(FHE.mul(actual, RATE_NUM), RATE_DEN);  // ← from actual
+    FHE.allowTransient(amountB, address(tokenB));
+    tokenB.confidentialTransfer(msg.sender, amountB);
+}
+```
+
+The same pattern applies to:
+- **AMM / CPMM swap & addLiquidity** — `_pullA(...)` should return the actual transferred handle so the constant-product check / share-mint math uses real numbers.
+- **Vault / lending deposit** — collateral credit must match what was pulled.
+- **Escrow create / fund** — already correct in `templates/confidential-escrow.sol`.
+
+**Detection**: `scripts/validate-fhevm.sh` Check 13 flags every `<token>.confidentialTransferFrom(...)` call whose return value isn't bound to a variable. Run it on every contract that integrates ERC-7984 from another contract.
+
 ### 7. Input Proofs Bound to msg.sender
 
 **Severity**: High — cross-contract encrypted inputs fail

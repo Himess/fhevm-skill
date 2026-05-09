@@ -653,6 +653,24 @@ main().catch(console.error);
 > coprocessor wiring manually — easier to just write a test that exits after
 > the assertions you care about.
 
+### Sepolia E2E: deltas, not absolutes
+
+Mock-mode tests assume a fresh chain with multiple signers (Hardhat seeds 20 funded accounts). On Sepolia, your deploy script typically runs from a single deployer key whose token balance carries over between runs:
+
+```typescript
+// ❌ FAILS on second run — balance is now 1980 + 500_000 prior balance
+const balance = await userDecryptU64(token, handle, deployer);
+expect(balance).to.equal(1980n);
+
+// ✅ Track the delta around the operation
+const before = await userDecryptU64(token, await token.confidentialBalanceOf(deployer.address), deployer);
+await contract.swap(...);
+const after  = await userDecryptU64(token, await token.confidentialBalanceOf(deployer.address), deployer);
+expect(after - before).to.equal(1980n);
+```
+
+The same applies to `confidentialBalanceOf` reads any time you re-run a script against an already-deployed contract: assert on the change, not the post-condition. For multi-signer flows on Sepolia, fund ephemeral wallets from the deployer (`deployer.sendTransaction({ to: ephemeral, value: ethers.parseEther("0.005") })`) — see the on-chain test scripts in `docs/onchain-evidence.md` for the canonical pattern.
+
 ## Hardhat Plugin Helper APIs
 
 Beyond `createEncryptedInput` and `userDecryptEuint`, the `@fhevm/hardhat-plugin` runtime provides several helpers:

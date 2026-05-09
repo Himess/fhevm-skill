@@ -170,7 +170,7 @@ If you just generated code containing any of these, STOP and fix:
 | `npm install @typechain/hardhat` (alone) | Crashes with `Couldn't find ethers-v6`. Always pair with `@typechain/ethers-v6@^0.5.1` AND bare `typechain@^8.3.2` (peer dep, not auto-installed) — otherwise compile fails with `HH801: Plugin @typechain/hardhat requires the following dependencies to be installed: typechain`. |
 | `@zama-fhe/relayer-sdk@^0.4.1` (caret) | Use `@zama-fhe/relayer-sdk@0.4.1` (exact). Caret resolves to 0.4.3 → plugin 0.4.2 hard-fails with "Invalid relayer-sdk version. Expecting 0.4.1." |
 | `npm install @zama-fhe/relayer-sdk@0.4.1` without `--save-exact` | Silently writes `"^0.4.1"` to `package.json` despite the explicit version. Always pin with `npm install --save-exact @zama-fhe/relayer-sdk@0.4.1` so the caret never sneaks back in. |
-| `abi.decode(cleartexts, (uint64))` | SDK encodes as `uint256`: use `abi.decode(cleartexts, (uint256))` then cast |
+| `abi.decode(cleartexts, (uint64))` *(in the on-chain `revealResults`-style callback after `publicDecrypt + checkSignatures`)* | SDK encodes EVERY cleartext as `uint256`: use `abi.decode(cleartexts, (uint256))` then cast down. **Note:** this applies to public-decrypt cleartexts decoded on-chain. The off-chain `userDecrypt` flow returns typed values directly through the SDK — no `abi.decode` needed there. |
 | `FHE.randEuint64(100)` | upperBound must be power of 2: `FHE.randEuint64(128)` then `FHE.rem(r, 100)` |
 
 ## Agent Workflow
@@ -190,7 +190,7 @@ If you just generated code containing any of these, STOP and fix:
 4. **Apply ACL pattern**: After every FHE operation that stores a value: `allowThis` + `allow`
 5. **Write tests**: Use templates/test-template.ts as boilerplate. Test silent failures
 6. **Validate**: Run `scripts/validate-fhevm.sh` against the contracts directory
-7. **Deploy**: `npx hardhat deploy --network sepolia` then verify
+7. **Deploy**: `npx hardhat run scripts/deploy.ts --network sepolia` then verify (use `templates/deploy-template.ts` — plain ethers, no `hardhat-deploy`)
 
 **When a user asks to add FHE to an existing contract:**
 
