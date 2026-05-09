@@ -137,6 +137,14 @@ A user-keyed mapping defaults to the zero handle — `bytes32(0)`. You **cannot*
 `FHE.add(uninitialized, x)` without first checking, because the zero handle has
 no ACL and no encrypted value behind it. The canonical accumulator idiom:
 
+> **"Check after deref" is the correct order, not a bug.** Reading an
+> uninitialized mapping slot returns the zero handle, which is a valid input
+> to `FHE.isInitialized()` (the function returns `false` for it). Loading the
+> slot first, then branching on `isInitialized`, is the canonical pattern —
+> not a defensive workaround. Some readers expect "check before deref" by
+> analogy with null-pointer guards in other languages; that's not how euint
+> handles work.
+
 ```solidity
 mapping(address => euint64) private _balances;
 
@@ -203,7 +211,19 @@ error state.
 
 ## The Mandatory ACL Pattern
 
-**Every time you create or modify an encrypted value that will be stored:**
+**The skill describes three different ACL flows. Each is correct for its scenario; the orderings differ on purpose.** Pick by the question "where will this handle be consumed next?":
+
+| Scenario | Where | Ordering |
+|---|---|---|
+| **Self-storage** (handle stays in *this* contract) | this section | op → `allowThis(new)` → `allow(new, user)` |
+| **Cross-contract pull/push** (handle is consumed by another contract in the same tx) | [Cross-Contract ACL Pattern](#cross-contract-acl-pattern) below + [erc7984-guide.md § Cross-Contract](erc7984-guide.md) | `allowTransient(arg, target)` → call → `allowThis(returned)` → `allow(returned, user)` |
+| **Public reveal** (handle is going to KMS for `publicDecrypt`) | [decryption-guide.md § Public Decryption](decryption-guide.md) | `makePubliclyDecryptable(handle)` — no `allow` needed |
+
+The three flows can chain inside a single function (e.g. an escrow that pulls in via cross-contract, stores via self-storage, and later reveals publicly).
+
+### Self-storage flow
+
+**Every time you create or modify an encrypted value that will be stored in this contract:**
 
 ```solidity
 // Step 1: Perform the FHE operation
@@ -216,7 +236,7 @@ FHE.allowThis(balances[user]);
 FHE.allow(balances[user], user);
 ```
 
-**Forgetting Step 2 is the #1 FHEVM bug.** The contract creates a new handle but loses access to it.
+**Forgetting Step 2 is the #1 FHEVM bug.** The contract creates a new handle but loses access to it. (For a cross-contract input or a publicly-decryptable output, see the table above for the right ordering.)
 
 ## Cross-Contract ACL Pattern
 

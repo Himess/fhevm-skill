@@ -49,6 +49,17 @@ The templates in `templates/` are NOT verbatim copies of Zama or OpenZeppelin ex
 
 > If you spot drift between this skill and an upstream pattern, file an issue. We pin deliberately; we don't auto-track upstream HEAD.
 
+### Import path pin (verified at v0.4.0)
+
+The `@openzeppelin/confidential-contracts@0.4.0` import paths used in this skill's templates:
+
+```solidity
+import {ERC7984}  from "@openzeppelin/confidential-contracts/token/ERC7984/ERC7984.sol";
+import {IERC7984} from "@openzeppelin/confidential-contracts/interfaces/IERC7984.sol";
+```
+
+OpenZeppelin sometimes restructures package layouts at major version bumps. If `@openzeppelin/confidential-contracts >= 0.5` reorganises (e.g. flattens or re-namespaces these paths), update every template's import statement and rerun the mock + Sepolia test suites before publishing the skill update. Treat such a bump the same way as a Solidity-side breaking change in the upgrade procedure above.
+
 ---
 
 ## When to consult upstream directly (and when not to)

@@ -199,7 +199,31 @@ struct Position {
 mapping(address => Position) private _positions;
 ```
 
-**Note**: Encrypted types in struct fields cannot be returned through interfaces (not ABI-safe). Use separate getter functions instead.
+**Note**: Encrypted types in struct fields cannot be returned through interfaces (not ABI-safe). Use **separate getter functions per field** instead — return one handle at a time, or destructure into a tuple of handles + plaintext fields:
+
+```solidity
+// ❌ Doesn't work — abigen can't roundtrip euintX through tuple ABI
+function getPositionBad(address user) external view returns (Position memory) {
+    return _positions[user];
+}
+
+// ✅ Pattern A: one handle per getter (cleanest)
+function collateralOf(address user) external view returns (euint64) { return _positions[user].collateral; }
+function debtOf      (address user) external view returns (euint64) { return _positions[user].debt; }
+function lastUpdateOf(address user) external view returns (uint256) { return _positions[user].lastUpdate; }
+
+// ✅ Pattern B: tuple of primitives (works because each euint64 unwraps to bytes32)
+function getPosition(address user)
+    external
+    view
+    returns (euint64 collateral, euint64 debt, uint256 lastUpdate)
+{
+    Position storage p = _positions[user];
+    return (p.collateral, p.debt, p.lastUpdate);
+}
+```
+
+Pattern A is the conservative choice — every confidential template in this skill (`cdp-vault.sol`, `confidential-amm.sol`, etc.) uses it. Pattern B works in practice but couples your getters to the struct shape.
 
 ## Initialization Check
 
