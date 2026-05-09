@@ -32,8 +32,8 @@ The agent will read [`SKILL.md`](SKILL.md) first; that file routes to whichever 
 fhevm-skill/
 ├── SKILL.md           ← agent entry point: architecture, decision trees, patterns
 ├── references/        ← 13 deep-dive guides (types, ACL, decryption, ERC-7984, …)
-├── templates/         ← 21 paste-ready files (10 contracts + 6 tests + 2 frontends + config)
-├── scripts/           ← validate-fhevm.sh — 12-rule lint
+├── templates/         ← paste-ready files (10 contracts + 6 tests + 2 React frontends + Vite frontend + on-chain E2E + deploy + config)
+├── scripts/           ← validate-fhevm.sh — 13-rule lint
 ├── stress-reports/    ← 9 independent agent stress-test runs (evidence)
 └── docs/              ← bounty-compliance + on-chain Sepolia evidence
 ```
@@ -54,8 +54,11 @@ Ten production-ready Solidity contracts plus matching tests + two React dashboar
 | `confidential-escrow.sol` | Buyer / seller / arbiter escrow |
 | `confidential-swap.sol` | Atomic fixed-rate swap |
 | `mock-erc20.sol` | Plain ERC-20 for wrap/unwrap testing |
-| `react-dashboard.tsx` | Frontend using the foundational SDK (relayer-sdk@0.4.1) |
-| `react-dashboard-v3.tsx` | Frontend using the high-level Token API (sdk@3.x + react-sdk@3.x) |
+| `react-dashboard.tsx` | React frontend on the foundational SDK (custom contracts, fine-grained control) |
+| `react-dashboard-v3.tsx` | React frontend on the high-level Token API (ERC-7984 token UIs) |
+| `vite-frontend/` | Vanilla-JS Vite frontend (no React) — fastest path for hackathon-tier prototypes |
+| `onchain-e2e.ts` | Paste-ready Sepolia end-to-end script (deploy + encrypt + KMS roundtrip + evidence JSON) |
+| `deploy-template.ts` | Plain-ethers deploy script (no hardhat-deploy) |
 
 ### Reference guides
 

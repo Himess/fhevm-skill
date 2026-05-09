@@ -683,9 +683,11 @@ For detailed guides, read the corresponding reference file:
 - **[templates/test-cdp-vault.ts](templates/test-cdp-vault.ts)** — 22-test suite for the CDP vault (deposit, borrow at safe LTV, silent over-LTV cap, repay, full liquidation flow with `publicDecrypt` + `checkSignatures` + on-chain liquidate, withdraw with debt-gate, access control)
 - **[templates/confidential-escrow.sol](templates/confidential-escrow.sol)** — Escrow with encrypted deposits, release, refund, arbiter dispute
 - **[templates/confidential-swap.sol](templates/confidential-swap.sol)** — Token swap with encrypted amounts and fee collection
-- **[templates/react-dashboard.tsx](templates/react-dashboard.tsx)** — Gen-2 React component (legacy `relayer-sdk`): connect, decrypt balance, encrypted transfer
-- **[templates/react-dashboard-v3.tsx](templates/react-dashboard-v3.tsx)** — Gen-3 React component (NEW `@zama-fhe/react-sdk`): hooks-based balance, transfer, shield/unshield, with `<ZamaProvider>` setup
+- **[templates/react-dashboard.tsx](templates/react-dashboard.tsx)** — React component built on the foundational SDK (`@zama-fhe/relayer-sdk/web`): manual encryption, decrypt balance, encrypted transfer. For non-token contracts or when you need fine-grained control.
+- **[templates/react-dashboard-v3.tsx](templates/react-dashboard-v3.tsx)** — React component built on the high-level Token API (`@zama-fhe/react-sdk`): hooks-based balance, transfer, shield/unshield, with `<ZamaProvider>` setup. For ERC-7984 token UIs.
+- **[templates/vite-frontend/](templates/vite-frontend/)** — Vanilla-JS Vite frontend (no React). Lowest-friction prototype; includes the load-bearing `optimizeDeps.exclude` rule that keeps the relayer-sdk WASM init path intact.
 - **[templates/deploy-template.ts](templates/deploy-template.ts)** — Plain-ethers deploy script (intentionally NOT `hardhat-deploy` — that package's transitive `zksync-web3@0.14.4` crashes on ethers v6; see Self-Correction Table)
+- **[templates/onchain-e2e.ts](templates/onchain-e2e.ts)** — Paste-ready Sepolia end-to-end script: deploy → encrypt via `@zama-fhe/relayer-sdk/node` → submit → KMS roundtrip → on-chain `checkSignatures` proof → save evidence JSON. Adapt the contract method block to your dApp.
 - **[templates/mock-erc20.sol](templates/mock-erc20.sol)** — Mock ERC-20 for testing wrap/unwrap flows
 
 ## Validation
