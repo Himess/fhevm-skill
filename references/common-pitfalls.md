@@ -240,6 +240,41 @@ The same pattern applies to:
 
 **Detection**: `scripts/validate-fhevm.sh` Check 13 flags every `<token>.confidentialTransferFrom(...)` call whose return value isn't bound to a variable. Run it on every contract that integrates ERC-7984 from another contract.
 
+### 6c. `ERC7984ZeroBalance` revert vs silent-zero asymmetry
+
+**Severity**: Medium — surprises a freshly-funded test path that expected silent-zero.
+
+ERC-7984's "transfers silently send 0 on insufficient balance" rule has an asymmetry that bites first-test runs:
+
+| Sender state | `confidentialTransferFrom(sender, ...)` behaviour |
+|---|---|
+| Has been minted any non-zero amount, even if currently zero | **Silent transfer of 0** (the canonical Pitfall #6 path) |
+| Was never minted a single token — sender's balance handle has *never been written* | **Hard revert** with `ERC7984ZeroBalance` |
+
+The revert is by design — an uninitialised balance handle has no ciphertext to subtract from, so the operation can't even start. But it surprises tests that try to validate the silent-fail path against a fresh wallet:
+
+```solidity
+// Test setup that hits the asymmetry:
+address stranger = makeAddr("stranger");
+// stranger never received tokens
+vm.prank(stranger);
+token.setOperator(address(jar), expiry);
+// This call REVERTS with ERC7984ZeroBalance, not "silent transfer 0":
+jar.tip(encodeAmount(100), proof);
+```
+
+**Fix**: in mock-mode tests that need to exercise the silent-zero path, mint at least one unit (even `1`) to the wallet first. The wallet then has an initialised handle and subsequent transfer attempts that exceed its balance silently transfer 0 as expected.
+
+```solidity
+// Test setup that uses silent-zero correctly:
+token.mint(stranger, FHE.asEuint64(1));   // initialise the handle (any non-zero works)
+vm.prank(stranger);
+token.setOperator(address(jar), expiry);
+jar.tip(encodeAmount(100), proof);          // ← silently transfers 0 (balance was 1, request was 100)
+```
+
+The same asymmetry applies to `confidentialTransfer` from the contract itself when a contract-internal balance has never been credited.
+
 ### 7. Input Proofs Bound to msg.sender
 
 **Severity**: High — cross-contract encrypted inputs fail

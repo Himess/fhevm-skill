@@ -348,6 +348,38 @@ const value = result.clearValues[handleAsHexString]; // bigint
 
 **Do NOT pass empty proof `"0x"`** — the KMSVerifier rejects empty proofs even in mock mode. Always use the proof from `fhevm.publicDecrypt()`.
 
+### Asserting custom-error reverts when the function takes encrypted inputs
+
+`@fhevm/hardhat-plugin@0.4.2` runs a pre-flight on every tx that takes encrypted handles + an `inputProof` (so it can validate the proof against the mock coprocessor). When that pre-flight catches a downstream `revert`, it wraps the original error with a generic message:
+
+```
+HardhatFhevmError: Fhevm assertion failed.
+```
+
+The chai matcher `revertedWithCustomError(contract, "MyError")` does NOT see through this wrap and will fail with a confusing message. Two reliable workarounds:
+
+```typescript
+// Pattern A (preferred when you only need to assert SOMETHING reverted):
+//   capture and regex-match the message.
+let reverted = false;
+try {
+    await contract.connect(alice).buyTickets(enc.handles[0], enc.inputProof);
+} catch (e: any) {
+    reverted = true;
+    expect(e.message).to.match(/AlreadyBought|Fhevm assertion failed/i);
+}
+expect(reverted).to.be.true;
+
+// Pattern B (when the function does NOT take encrypted inputs):
+//   the wrap doesn't apply, so the canonical chai matcher works.
+await expect(contract.connect(stranger).pause())
+    .to.be.revertedWithCustomError(contract, "NotEmployer");
+```
+
+The wrap fires whenever the SDK has to validate an `externalEuint*` + `inputProof` pair — i.e. any function that calls `FHE.fromExternal(...)` early in its body. Functions guarded by a plaintext check (`onlyOwner`, lifecycle state, etc.) that revert *before* `FHE.fromExternal` are NOT wrapped and Pattern B works on them. The same is true for non-FHE functions like `pause`, `withdraw`, view assertions.
+
+> **Why this happens:** the hardhat-plugin schedules the proof verification before the EVM call, so when the verification path itself observes a revert it has no way to surface the original custom-error selector. This is a plugin-side limitation, not a Solidity limitation. It's been raised upstream; for now Pattern A is the canonical workaround.
+
 ### Asserting Constructor Reverts
 
 When a constructor reverts (e.g., bad arg validation), there is no contract instance to call `expect(...)` on. Assert against the **factory's `deploy()` call**:

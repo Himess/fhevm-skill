@@ -121,6 +121,66 @@ const clearAddr = await fhevm.userDecryptEaddress(
 
 **Available FhevmType values**: `euint8`, `euint16`, `euint32`, `euint64`, `euint128`, `euint256`
 
+### Reusable `userDecryptOne` helper (frontend / Node scripts)
+
+Every dApp re-implements the same 7-step keypair → EIP-712 → userDecrypt → BigInt cast flow above, and stress-test agents flagged this as the most-duplicated boilerplate in the skill. Drop the helper below into your frontend's utils (or any Node onchain-e2e script) and the per-call site collapses to a single line:
+
+```typescript
+// utils/userDecryptOne.ts
+import { ethers } from "ethers";
+// `fhevm` is the relayer-sdk instance returned by `createInstance(...)`.
+// `signer` is an ethers.Signer (browser MetaMask, Node Wallet — both work).
+
+export async function userDecryptOne(
+    fhevm: any,
+    handle: bigint | Uint8Array | string, // raw handle from the contract
+    contractAddress: string,
+    signer: ethers.Signer,
+    durationDays: number = 1,
+): Promise<bigint> {
+    const handleBig = typeof handle === "bigint" ? handle : BigInt(ethers.hexlify(handle));
+    const hexHandle = ethers.toBeHex(handleBig, 32) as `0x${string}`;
+
+    const keypair = fhevm.generateKeypair();
+    const startTimestamp = Math.floor(Date.now() / 1000);
+    const eip712 = fhevm.createEIP712(
+        keypair.publicKey,
+        [contractAddress],
+        startTimestamp,
+        durationDays,
+    );
+
+    const signature = await signer.signTypedData(
+        eip712.domain,
+        // 0.4.1 readonly TypedDataField[] — spread to get a mutable copy
+        { UserDecryptRequestVerification: [...eip712.types.UserDecryptRequestVerification] },
+        eip712.message,
+    );
+
+    const result = await fhevm.userDecrypt(
+        [{ handle: handleBig, contractAddress }],
+        keypair.privateKey,
+        keypair.publicKey,
+        signature.slice(2),                           // strip leading "0x"
+        [contractAddress],
+        await signer.getAddress(),
+        startTimestamp,
+        durationDays,
+    );
+
+    return result[hexHandle] as bigint;
+}
+```
+
+Call site:
+
+```typescript
+const balance = await userDecryptOne(fhevm, balanceHandle, tokenAddress, signer);
+console.log("balance:", balance.toString());
+```
+
+For multi-handle decrypts (e.g. `[totalHandle, claimedHandle]` for a vesting schedule) keep the lower-level form — the savings only apply when you're calling the same shape repeatedly. The helper is intentionally untyped on `fhevm` to avoid pulling the relayer-sdk type surface into your utils file; type it as `import("@zama-fhe/relayer-sdk").FhevmInstance` if you want stricter typing.
+
 ## Public Decryption
 
 When a value needs to be revealed publicly (e.g., auction winner, vote tally), use the 3-step public decryption flow.
@@ -152,6 +212,9 @@ const result = await fhevm.publicDecrypt(handles);
 // result.abiEncodedClearValues → for on-chain verification
 // result.decryptionProof → KMS signatures
 ```
+
+> **⚠ Naming gotcha — `abiEncodedClearValues` (JS) vs `abiEncodedCleartexts` (Solidity).**
+> The SDK return shape is **`{ clearValues, abiEncodedClearValues, decryptionProof }`**, but on-chain reveal functions in the Zama-published templates declare the parameter as **`bytes calldata abiEncodedCleartexts`**. Same bytes, different field name. Wiring `dec.abiEncodedCleartexts` to the contract silently passes `undefined` (because that field doesn't exist on the SDK result) and surfaces as a confusing chai BigInt-normalize error rather than a helpful "missing argument". Always read `dec.abiEncodedClearValues` from the SDK and pass it to the on-chain `abiEncodedCleartexts` parameter — or rename your contract parameter to `abiEncodedClearValues` so JS and Solidity match. The skill's own templates use the on-chain `abiEncodedCleartexts` spelling for consistency with prior Zama examples.
 
 ### Step 3: Verify On-Chain (Callback)
 

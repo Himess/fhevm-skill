@@ -518,6 +518,43 @@ contract MyToken is ZamaEthereumConfig, ERC7984, Ownable2Step {
 
 See **[references/erc7984-guide.md](references/erc7984-guide.md)** for complete interface, operator model, wrap/unwrap, extensions, and cross-contract patterns.
 
+### Pattern 7: Snapshot-Then-Reveal (long-lived public decryption)
+
+Whenever you have an **encrypted aggregate that mutates between request and finalize** (running tally, max-of-N, monthly volume, all-time-highest, leaderboard top-K, lifetime tip total, jar balance), you MUST snapshot the handle at request time. Use the snapshot — not the live storage value — in `FHE.checkSignatures` at finalize time.
+
+**Why:** every FHE op produces a fresh handle. If a user action mutates the aggregate during the seconds-long KMS roundtrip, the storage handle is now different from the one the KMS signed. `FHE.checkSignatures` reverts with a signature mismatch.
+
+```solidity
+contract MonthlyReveal is ZamaEthereumConfig {
+    euint64 private _monthlyTotal;        // mutates on every contribution()
+    bytes32 private _pendingRevealHandle; // captured at request time
+    uint64  public  revealedTotal;
+
+    function requestReveal() external {
+        FHE.makePubliclyDecryptable(_monthlyTotal);
+        _pendingRevealHandle = FHE.toBytes32(_monthlyTotal);  // ← SNAPSHOT
+    }
+
+    function finalizeReveal(bytes calldata cleartexts, bytes calldata proof) external {
+        require(_pendingRevealHandle != bytes32(0), "no reveal pending");
+        bytes32[] memory handles = new bytes32[](1);
+        handles[0] = _pendingRevealHandle;                     // ← snapshotted, not live
+        FHE.checkSignatures(handles, cleartexts, proof);
+        revealedTotal = uint64(abi.decode(cleartexts, (uint256)));
+        _pendingRevealHandle = bytes32(0);                     // clear so a stale finalize can't re-fire
+    }
+
+    function contribute(externalEuint64 enc, bytes calldata p) external {
+        _monthlyTotal = FHE.add(_monthlyTotal, FHE.fromExternal(enc, p));
+        FHE.allowThis(_monthlyTotal);  // re-grant ACL on the new handle (the snapshot still works)
+    }
+}
+```
+
+**KMS hardening note:** a handle that was produced ONLY by `FHE.asEuint64(0)` (constructor init, never touched by a real FHE op) will fail `publicDecrypt` with `KMSInvalidSigner`. Guard `requestReveal` with a `if (eventCount == 0) revert NoActivityYet();` check, or pre-mutate the aggregate before exposing it.
+
+For concurrent in-flight reveals (multiple requestIds outstanding) key the snapshot by request id — `mapping(uint256 => bytes32)` — see the unwrap recipe in `references/decryption-guide.md`. Also see `templates/confidential-tip-jar.sol` and `templates/confidential-lottery.sol` for the full shape in production templates.
+
 ### Privileged-Role Pattern Selection
 
 Most FHEVM contracts need an admin role (mint, end auction, settle, slash, etc.). Pick by lifecycle:
@@ -569,6 +606,8 @@ euint64 result = FHE.div(amount, uint64(100));  // Plaintext divisor only
 ebool sufficient = FHE.ge(balance, amount);
 euint64 actual = FHE.select(sufficient, amount, FHE.asEuint64(0));
 ```
+
+> **Plaintext role checks are FINE.** This anti-pattern is specifically about `require`/`if` on a *decrypted encrypted value*. Plaintext checks on plaintext state are correct and safe: `if (msg.sender != creator) revert NotCreator();`, `Ownable.onlyOwner`, `setOperator(address, expiry)` reverting with `ERC7984UnauthorizedSpender`, `block.timestamp >= deadline`, and similar — these reveal nothing confidential because the role / address / timestamp / operator relationship was never private to begin with. The leak only happens when a plaintext branch decision is derived from an encrypted comparison.
 
 ### 5. Random in view functions [HIGH — runtime revert]
 
@@ -680,6 +719,8 @@ For detailed guides, read the corresponding reference file:
 - **[templates/vickrey-auction.sol](templates/vickrey-auction.sol)** — Sealed-bid SECOND-price (Vickrey) auction with ERC-7984 escrow, top-2 chained-`gt`+`select` ranking, mixed-type 2-handle reveal, 4-state lifecycle (Bidding→Ended→Revealed→Settled)
 - **[templates/confidential-amm.sol](templates/confidential-amm.sol)** — Single-pair constant-product AMM (encrypted reserves, plaintext LP supply, 0.3% fees, multiplicative-invariant gate with silent refund on caller-cheat, ACL-gated TVL reveal). Crystallises the design from `common-pitfalls.md` §11b.
 - **[templates/cdp-vault.sol](templates/cdp-vault.sol)** — Collateral-debt position vault (encrypted collateral/debt, plaintext oracle, public-decryptable liquidation flag with `checkSignatures` round-trip, Pitfall #11 mul-overflow mitigations: 60/100→3/5, 80/100→4/5)
+- **[templates/confidential-tip-jar.sol](templates/confidential-tip-jar.sol)** — Aggregate-with-private-contributors pattern (tip jars, fundraisers, GoFundMe). Per-tipper ACL split + Pattern 7 (Snapshot-Then-Reveal) for the lifetime total
+- **[templates/confidential-lottery.sol](templates/confidential-lottery.sol)** — Encrypted-tickets lottery / commit-reveal raffle. Range allocation `[start, start+count)`, publicly-decryptable winner-flag proof, multi-round state machine, partial-pay handling on `confidentialTransferFrom` silent zero
 - **[templates/hardhat.config.ts](templates/hardhat.config.ts)** — Production-ready Hardhat configuration
 - **[templates/test-template.ts](templates/test-template.ts)** — ERC-7984 test boilerplate matched to `templates/confidential-erc20.sol` (mint, confidentialTransfer, operator model, ACL)
 - **[templates/test-erc7984-template.ts](templates/test-erc7984-template.ts)** — Generic ERC-7984 test boilerplate using a fixture pattern
@@ -698,11 +739,15 @@ For detailed guides, read the corresponding reference file:
 
 ## Validation
 
-Run `scripts/validate-fhevm.sh` against your contracts to catch common FHEVM mistakes before deployment:
+Run the validator against your contracts to catch common FHEVM mistakes before deployment:
 
 ```bash
+# macOS / Linux / Git Bash / WSL:
 chmod +x scripts/validate-fhevm.sh
 ./scripts/validate-fhevm.sh ./contracts
+
+# Native Windows PowerShell (no bash needed):
+powershell -ExecutionPolicy Bypass -File scripts/validate-fhevm.ps1 ./contracts
 ```
 
-Checks: missing `allowThis`, deprecated TFHE usage, encrypted divisors, branching on encrypted values, missing `cancun` evmVersion, deprecated Gateway pattern, euint256 ordering comparisons, and more.
+Both scripts run the same 13 checks and use identical exit codes (0 = pass, 1 = warnings, 2 = errors). Checks: missing `allowThis`, deprecated TFHE usage, encrypted divisors, branching on encrypted values, missing `cancun` evmVersion, deprecated Gateway pattern, euint256 ordering comparisons, hallucinated FHE functions, non-existent encrypted types, discarded `confidentialTransferFrom` return value (drain bug), and more.

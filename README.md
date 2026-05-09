@@ -32,15 +32,15 @@ The agent will read [`SKILL.md`](SKILL.md) first; that file routes to whichever 
 fhevm-skill/
 ├── SKILL.md           ← agent entry point: architecture, decision trees, patterns
 ├── references/        ← 15 deep-dive guides (types, ACL, decryption, ERC-7984, time-based accrual, …)
-├── templates/         ← paste-ready files (10 contracts + 6 tests + 2 React frontends + Vite frontend + on-chain E2E + deploy + config)
-├── scripts/           ← validate-fhevm.sh — 13-rule lint
+├── templates/         ← paste-ready files (12 contracts + 6 tests + 2 React frontends + Vite frontend + on-chain E2E + deploy + config)
+├── scripts/           ← validate-fhevm.{sh,ps1} — 13-rule lint (bash + PowerShell)
 ├── stress-reports/    ← 9 independent agent stress-test runs (evidence)
 └── docs/              ← bounty-compliance + on-chain Sepolia evidence
 ```
 
 ### Templates
 
-Ten production-ready Solidity contracts plus matching tests + two React dashboards:
+Twelve production-ready Solidity contracts plus matching tests + two React dashboards:
 
 | Template | Pattern crystallised |
 |---|---|
@@ -51,6 +51,8 @@ Ten production-ready Solidity contracts plus matching tests + two React dashboar
 | `vickrey-auction.sol` | Sealed-bid second-price (top-2 ranking, ERC-7984 escrow, 4-state lifecycle) |
 | `confidential-amm.sol` | Single-pair constant-product AMM (encrypted reserves, plaintext LP supply, multiplicative-invariant gate) |
 | `cdp-vault.sol` | Encrypted collateral / debt with public-decryptable liquidation flag |
+| `confidential-tip-jar.sol` | Aggregate-with-private-contributors (tip jar / fundraiser) — Pattern 7 (Snapshot-Then-Reveal) for the lifetime total |
+| `confidential-lottery.sol` | Encrypted-tickets lottery with publicly-decryptable winner-flag proof and partial-pay handling |
 | `confidential-escrow.sol` | Buyer / seller / arbiter escrow |
 | `confidential-swap.sol` | Atomic fixed-rate swap |
 | `mock-erc20.sol` | Plain ERC-20 for wrap/unwrap testing |
