@@ -1,0 +1,20 @@
+# Audit / stress-test artifacts (internal — not part of the skill)
+AUDIT-REPORT-*.md
+stress-reports/
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Node / build (in case anyone runs templates locally inside the skill folder)
+node_modules/
+dist/
+artifacts/
+cache/
+typechain-types/
+output/
+test-output/
+.env
+*.log
