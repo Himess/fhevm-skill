@@ -1,5 +1,19 @@
 # FHEVM Frontend Integration
 
+> **Heads-up — pick the right SDK first.** As of April 2026 there are two
+> supported frontend SDKs:
+>
+> - **`@zama-fhe/sdk@3.x`** (Gen-3, current default) — high-level `Token` API,
+>   `useConfidentialBalance` / `useConfidentialTransfer` hooks via
+>   `@zama-fhe/react-sdk`. **Use this for new browser/React apps.** See
+>   [sdk-v3-guide.md](sdk-v3-guide.md) and [react-sdk-guide.md](react-sdk-guide.md).
+> - **`@zama-fhe/relayer-sdk@0.4.x`** (Gen-2) — low-level `createInstance` +
+>   `createEncryptedInput` API. **Still required** by `@fhevm/hardhat-plugin@0.4.2`
+>   for tests, and useful for custom non-token contracts. **The rest of this
+>   document covers Gen-2.**
+>
+> See `SKILL.md` § "Three SDK Generations" for the full decision matrix.
+
 ## SDK Setup
 
 The Relayer SDK (`@zama-fhe/relayer-sdk`) replaces the deprecated `fhevmjs` package.
@@ -27,10 +41,12 @@ import { createInstance, SepoliaConfig, MainnetConfig } from '@zama-fhe/relayer-
 // - Node.js: an RPC URL string like "https://ethereum-sepolia-rpc.publicnode.com"
 // - Hardhat scripts: use string URL (ethers.provider object does NOT work)
 
-// IMPORTANT: Handle types differ between /web and /node:
-// - /web: encrypted.handles[0] is a hex string ("0x...")
-// - /node: encrypted.handles[0] may be a BigInt
-// Always convert: String(encrypted.handles[0]) or `0x${encrypted.handles[0].toString(16)}`
+// IMPORTANT (relayer-sdk@0.4.1 — the version paired with @fhevm/hardhat-plugin@0.4.2):
+//   encrypted.handles    : Uint8Array[]   ← raw bytes, not hex, not BigInt
+//   encrypted.inputProof : Uint8Array     ← raw bytes
+// Pass directly to ethers v6 contract calls; for string-keyed lookups (publicDecrypt
+// result records) hex-encode first. See § "Handle Types in @zama-fhe/relayer-sdk@0.4.1"
+// below for the toHex() helper.
 
 // Sepolia Testnet
 const fhevm = await createInstance({
@@ -45,6 +61,35 @@ const fhevm = await createInstance({
     auth: { __type: 'ApiKeyHeader', value: ZAMA_API_KEY },
 });
 ```
+
+### Public TypeScript Types (relayer-sdk@0.4.1)
+
+These are the actual named exports in `@zama-fhe/relayer-sdk@0.4.1` (verified
+against `node_modules/@zama-fhe/relayer-sdk/lib/web.d.ts`):
+
+```typescript
+import type {
+    FhevmInstance,                  // interface — return type of createInstance()
+    FhevmInstanceConfig,            // config object passed to createInstance()
+    RelayerEncryptedInput,          // builder returned by createEncryptedInput()
+    HandleContractPair,             // { handle, contractAddress } — userDecrypt input
+    UserDecryptResults,             // Record<`0x${string}`, bigint | boolean | `0x${string}`>
+    PublicDecryptResults,           // { clearValues, abiEncodedClearValues, decryptionProof }
+    KmsUserDecryptEIP712Type,       // typed-data shape from createEIP712()
+    KmsUserDecryptEIP712TypesType,  // the inner `types` part (readonly tuple — needs spread for ethers v6)
+    KeypairType,                    // generic; instance type is KeypairType<BytesHexNo0x>
+    ClearValueType,                 // bigint | boolean | `0x${string}`
+} from '@zama-fhe/relayer-sdk/web';
+```
+
+**Watch out — common mistakes that don't compile against 0.4.1:**
+
+| Wrong (often seen in old guides) | Correct (0.4.1) |
+|---|---|
+| `EncryptResult` | does **not** exist — the encrypt() return is anonymous: `Promise<{ handles: Uint8Array[]; inputProof: Uint8Array }>`. If you need a name, define `type EncryptResult = Awaited<ReturnType<RelayerEncryptedInput['encrypt']>>;` locally. |
+| `DecryptedResults` | `UserDecryptResults` |
+| `EIP712` | `KmsUserDecryptEIP712Type` |
+| `Keypair` | `KeypairType<BytesHexNo0x>` (generic over the byte-encoding type — typically `BytesHexNo0x`) |
 
 ### Manual Configuration
 
@@ -65,7 +110,14 @@ const fhevm = await createInstance({
 ### CDN / Vanilla JS (Browser)
 
 ```html
-<script src="https://cdn.zama.org/relayer-sdk-js/<version>/relayer-sdk-js.umd.cjs"></script>
+<!-- The canonical CDN host is `cdn.zama.org` and `@zama-fhe/sdk@3.0.0`
+     hardcodes 0.4.2 inside its worker (verified at
+     `node_modules/@zama-fhe/sdk/dist/esm/index.js:514`). For consistency
+     with the SDK's own SRI integrity hash, use 0.4.2 here too unless you
+     have a specific reason to bump. Verify newer versions at
+     https://www.npmjs.com/package/@zama-fhe/relayer-sdk and re-check the
+     SDK's hardcoded URL after every Zama point release. -->
+<script src="https://cdn.zama.org/relayer-sdk-js/0.4.2/relayer-sdk-js.umd.cjs"></script>
 <script>
   async function init() {
     const { initSDK, createInstance, SepoliaConfig } = window.relayerSdk;
@@ -78,33 +130,46 @@ const fhevm = await createInstance({
 </script>
 ```
 
-## CRITICAL: Handle Types Differ Between /web and /node
+## CRITICAL: Handle Types in `@zama-fhe/relayer-sdk@0.4.1`
 
-The Relayer SDK returns encrypted handles in different types depending on the subpath:
+In the **pinned 0.4.1** version that `@fhevm/hardhat-plugin@0.4.2` requires, the
+return shape is the same on both `/web` and `/node` — and it is **NOT** a hex
+string:
 
-| Subpath | `encrypted.handles[0]` type | Example value |
-|---------|----------------------------|---------------|
-| `/web` (browser) | hex string | `"0x1a2b3c..."` |
-| `/node` (Node.js) | BigInt | `123456789n` |
-
-**Always normalize handles before using them:**
-
-```typescript
-// Works in BOTH /web and /node:
-const handleAsHex = typeof encrypted.handles[0] === "string"
-    ? encrypted.handles[0]
-    : `0x${encrypted.handles[0].toString(16).padStart(64, "0")}`;
-
-// For passing to contracts, ethers.js accepts both string and BigInt.
-// But if you need a string (e.g., for lookup in decrypt results):
-const handleKey = String(encrypted.handles[0]);
-
-// When using result.clearValues[handle]:
-const value = result.clearValues[String(encrypted.handles[0])];
-// NOT: result.clearValues[encrypted.handles[0]] — fails in /node!
+```ts
+const encrypted = await input.encrypt();
+// encrypted.handles      : Uint8Array[]   ← raw bytes, NOT hex strings, NOT BigInt
+// encrypted.inputProof   : Uint8Array     ← raw bytes
 ```
 
-**Common error**: `encrypted.handles[0].substring()` crashes in /node because BigInt has no `.substring()`. Always use `String(...)` first or check the type.
+ethers v6 contract calls accept `BytesLike` (which includes `Uint8Array`), so
+passing `encrypted.handles[0]` and `encrypted.inputProof` directly to a
+contract write usually works. But for any string-keyed lookup (e.g.
+`publicDecrypt` result records, logging, comparison) you need to hex-encode:
+
+```typescript
+// Normalize to 0x-prefixed bytes32 hex (32 bytes = 64 chars)
+function toHex(buf: Uint8Array): `0x${string}` {
+    return ("0x" + Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("")) as `0x${string}`;
+}
+
+// Common shape — directly pass Uint8Array to ethers v6:
+await contract.deposit(encrypted.handles[0], encrypted.inputProof);
+
+// When you need a string key (e.g. result.clearValues lookup):
+const handleHex = toHex(encrypted.handles[0]);
+const value = result.clearValues[handleHex];   // bigint
+```
+
+**Common errors caught by this:**
+- `encrypted.handles[0].substring()` → `TypeError: handles[0].substring is not a function` (it's a `Uint8Array`, not a string).
+- `result.clearValues[encrypted.handles[0]]` → `undefined` (object keys are strings; passing a `Uint8Array` stringifies to "0,1,2,...").
+- `BigInt(encrypted.handles[0])` → `TypeError`. Pass through `toHex()` first, then `BigInt(toHex(...))` if you need a numeric form.
+
+> **Older skill versions documented this as "hex on /web, BigInt on /node".** That
+> applied to a pre-0.4.1 line and is no longer accurate against the version
+> `@fhevm/hardhat-plugin@0.4.2` pins to. If you upgrade past `0.4.1`, re-verify
+> the shape against `node_modules/@zama-fhe/relayer-sdk/web.d.ts`.
 
 ## ABI Encoding of Encrypted Types
 
@@ -189,6 +254,26 @@ contract["confidentialTransferAndCall(address,uint256,bytes)"](to, existingHandl
 contract["confidentialTransferFromAndCall(address,address,bytes32,bytes,bytes)"](from, to, handle, proof, data);
 contract["confidentialTransferFromAndCall(address,address,uint256,bytes)"](from, to, existingHandle, data);
 ```
+
+### Solidity Auto-Getter Gotcha: Public Arrays
+
+A `string[] public choices` Solidity field auto-generates `choices(uint256 i)`,
+**not** `choices.length`. Calling `await contract.choices.length` from
+JavaScript fails. Always expose a separate `numChoices()` (or similar) view:
+
+```solidity
+string[] public choices;
+function numChoices() external view returns (uint256) { return choices.length; }
+```
+
+```typescript
+// Frontend:
+const n = await contract.numChoices();
+const labels: string[] = [];
+for (let i = 0; i < Number(n); i++) labels.push(await contract.choices(i));
+```
+
+Same gotcha applies to dynamic mappings — auto-getters never expose `.length` or iteration.
 
 ### Solidity Struct Getters: Tuple Return Order
 
@@ -288,9 +373,13 @@ const eip712 = fhevm.createEIP712(
 );
 
 // User signs (triggers MetaMask popup)
+//
+// ⚠ Strict TypeScript: `eip712.types.UserDecryptRequestVerification` is a
+// `readonly TypedDataField[]`, but ethers v6 `signTypedData` expects a
+// mutable `Record<string, TypedDataField[]>`. Spread to copy:
 const signature = await signer.signTypedData(
     eip712.domain,
-    { UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification },
+    { UserDecryptRequestVerification: [...eip712.types.UserDecryptRequestVerification] },
     eip712.message,
 );
 
@@ -299,14 +388,19 @@ const result = await fhevm.userDecrypt(
     [{ handle: encryptedHandle, contractAddress }],
     keypair.privateKey,
     keypair.publicKey,
-    signature.replace('0x', ''),
+    signature.slice(2),  // strip the leading "0x" before sending to the relayer
     contractAddresses,
     signer.address,
     startTimestamp,
     durationDays,
 );
 
-const clearValue = result[encryptedHandle]; // bigint
+// `result` is keyed by `0x${string}`. If `encryptedHandle` is a plain string
+// or bigint, normalize + cast (see "Strict TypeScript: handle-key cast" above):
+const handleHex = (typeof encryptedHandle === "bigint"
+    ? ethers.toBeHex(encryptedHandle, 32)
+    : encryptedHandle) as `0x${string}`;
+const clearValue = result[handleHex]; // bigint
 ```
 
 ### 4. Public Decryption (Browser SDK)
@@ -332,14 +426,38 @@ result.abiEncodedClearValues    // bytes string — pass to contract's checkSign
 result.decryptionProof          // bytes string — KMS proof
 
 // Access individual decrypted values:
-const yesCount = result.clearValues[yesHandle.toString()];
-const noCount = result.clearValues[noHandle.toString()];
+// `result.clearValues` is typed `Record<`0x${string}`, bigint | boolean | string>`,
+// so a plain `.toString()` key fails strict TypeScript with
+// "Element implicitly has an 'any' type because expression of type 'string'
+//  can't be used to index type". Cast to the template-literal type:
+const yesCount = result.clearValues[ethers.toBeHex(yesHandle, 32) as `0x${string}`];
+const noCount  = result.clearValues[ethers.toBeHex(noHandle,  32) as `0x${string}`];
 
 // Submit proof to contract for on-chain verification:
 await contract.revealResults(result.abiEncodedClearValues, result.decryptionProof);
 ```
 
 **Important**: `publicDecrypt` only works for handles that have been marked as `makePubliclyDecryptable` on-chain. If the handle hasn't been marked, the KMS will reject the request.
+
+**Strict TypeScript: handle-key cast**
+
+`clearValues` (and the `userDecrypt` result) is keyed by `` `0x${string}` `` — a
+template-literal type. Plain `string`, `bigint.toString()`, or even
+`encrypted.handles[0]` (a `Uint8Array`) will not type-check under strict mode.
+Always normalize to a 32-byte hex string and cast:
+
+```ts
+import { ethers } from "ethers";
+
+// From an on-chain handle (uint256 → bigint in ethers v6):
+const handle = (await contract.getYesVotesHandle()) as bigint;
+const key = ethers.toBeHex(handle, 32) as `0x${string}`;
+const yes = result.clearValues[key];   // ✓ typed bigint
+
+// From an encryption result (Uint8Array → hex):
+const inputKey = toHex(encrypted.handles[0]);  // already `0x${string}`
+const v = result.clearValues[inputKey];        // ✓
+```
 
 ### publicDecrypt: Hardhat Test vs Browser SDK
 
@@ -382,11 +500,12 @@ function useConfidentialBalance(contractAddress: string) {
                 keypair.publicKey,
                 [contractAddress],
                 startTimestamp,
-                '10',
+                10,                  // durationDays — number, not string
             );
             const signature = await signer.signTypedData(
                 eip712.domain,
-                { UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification },
+                // Spread the readonly type tuple into a mutable copy for ethers v6
+                { UserDecryptRequestVerification: [...eip712.types.UserDecryptRequestVerification] },
                 eip712.message,
             );
 
@@ -395,15 +514,15 @@ function useConfidentialBalance(contractAddress: string) {
                 [{ handle: encHandle, contractAddress }],
                 keypair.privateKey,
                 keypair.publicKey,
-                signature.replace('0x', ''),
+                signature.slice(2),  // strip the leading "0x" before sending to the relayer
                 [contractAddress],
                 await signer.getAddress(),
                 startTimestamp,
                 10,
             );
 
-            // encHandle is a bigint — convert to 32-byte hex for lookup
-            const hexHandle = ethers.toBeHex(encHandle, 32);
+            // encHandle is a bigint — convert to 32-byte hex and cast to `0x${string}` for lookup
+            const hexHandle = ethers.toBeHex(encHandle, 32) as `0x${string}`;
             setBalance(result[hexHandle]);
         } finally {
             setLoading(false);
@@ -609,7 +728,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
     plugins: [react()],
     optimizeDeps: {
-        exclude: ["@zama-fhe/relayer-sdk"], // Don't pre-bundle WASM modules
+        exclude: ["@zama-fhe/relayer-sdk/web"], // Don't pre-bundle WASM modules
     },
     build: {
         target: "esnext", // Required for top-level await used by WASM
@@ -647,6 +766,61 @@ export default function Home() { return <FhevmDashboard />; }
 ```
 
 If you see `WebAssembly.instantiate` errors, ensure your bundler supports WASM and the SDK is not being pre-bundled/optimized.
+
+### Multi-Threaded WASM (5–10× faster encryption)
+
+The Relayer SDK's WASM module can run on multiple threads via `SharedArrayBuffer`,
+which speeds up encryption substantially (~5–10× on a 4-core laptop). This is
+gated behind a browser security feature: `SharedArrayBuffer` is **only available
+in cross-origin-isolated contexts**, which require both of these response headers
+on every page that loads the SDK:
+
+```
+Cross-Origin-Opener-Policy:   same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+#### Next.js (`next.config.js`)
+
+```js
+const nextConfig = {
+    async headers() {
+        return [{
+            source: "/(.*)",
+            headers: [
+                { key: "Cross-Origin-Opener-Policy",   value: "same-origin" },
+                { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+            ],
+        }];
+    },
+};
+```
+
+#### Vite (`vite.config.ts`)
+
+```ts
+server: {
+    headers: {
+        "Cross-Origin-Opener-Policy":   "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+},
+preview: {
+    headers: { /* same as above */ },
+},
+```
+
+**Symptom of missing headers**: encryption is single-threaded and slow, and the
+SDK logs `threads option requires SharedArrayBuffer (COOP/COEP headers).
+Falling back to single-threaded.` (verified inside `@zama-fhe/sdk@3.0.0`'s
+`RelayerWeb` worker).
+
+**Caveat**: COEP `require-corp` blocks any third-party `<img>`, `<script>`,
+`<iframe>`, etc., that doesn't return a `Cross-Origin-Resource-Policy:
+cross-origin` header. If your app embeds external content (analytics, fonts,
+images from CDNs), either route them through your origin or set the resource
+policy on those endpoints. Vercel-hosted `cdn.zama.org` already returns the
+correct CORP header for the SDK's WASM bundle.
 
 ## Wallet Chain Switching (Sepolia)
 

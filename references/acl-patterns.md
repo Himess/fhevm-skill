@@ -69,15 +69,32 @@ function revealWinner() external onlyOwner {
 }
 ```
 
-## ACL Check Functions (View)
+## ACL Check Functions (View / Pure)
+
+`FHE.sol` exposes a small set of state-mutation-free helpers you can safely call
+from `view` (and one `pure`) functions:
 
 ```solidity
-FHE.isAllowed(euint64 value, address account) returns (bool)
-FHE.isSenderAllowed(euint64 value) returns (bool)  // Checks msg.sender
-FHE.isPubliclyDecryptable(euint64 value) returns (bool)
+// Pure — no state read at all (handle equals bytes32(0) check):
+FHE.isInitialized(euintX|ebool|eaddress v) returns (bool)
+
+// View — read the on-chain ACL contract:
+FHE.isAllowed(euintX|ebool|eaddress value, address account) returns (bool)
+FHE.isSenderAllowed(euintX|ebool|eaddress value)            returns (bool)  // checks msg.sender
+FHE.isPubliclyDecryptable(euintX|ebool|eaddress value)      returns (bool)
+FHE.isAccountDenied(address account)                        returns (bool)
+FHE.isUserDecryptable(bytes32 handle, address user, address contractAddress) returns (bool)
+FHE.isDelegatedForUserDecryption(...)                       returns (bool)
+FHE.getDelegatedUserDecryptionExpirationDate(...)           returns (uint256)
 ```
 
-Use these for access control in getter functions:
+These are the **only** state-free helpers in `FHE.sol`. Every other call (add,
+sub, mul, select, eq, gt, fromExternal, asEuintX, makePubliclyDecryptable, …)
+routes through the coprocessor and counts as state-changing — so you can freely
+use the checks above inside `view`/`pure` getters, but you cannot combine them
+with arithmetic or `select` and still keep the function `view`.
+
+Use them for access control in getter functions:
 
 ```solidity
 function getBalance(address user) external view returns (euint64) {
@@ -85,6 +102,104 @@ function getBalance(address user) external view returns (euint64) {
     return balances[user];
 }
 ```
+
+> **Important:** `FHE.isAllowed` checks the on-chain ACL set by
+> `FHE.allowThis`/`FHE.allow`/`FHE.makePubliclyDecryptable`. It does **not**
+> attempt decryption, does **not** call the coprocessor, and does **not**
+> mutate state — that's why it can be used in `view` functions. A common
+> misconception is that this check "leaks" whether the caller has access; it
+> doesn't, because the ACL itself is public information (the same value is
+> visible from off-chain via the ACL contract's events). The confidentiality
+> guarantee covers the *plaintext value*, not the access list.
+
+> **`isInitialized` pure-vs-view nuance:** `FHE.isInitialized(handle)` is
+> declared `pure` because it only inspects the handle's *value* (`handle ==
+> bytes32(0)`) — it never reads contract storage or the ACL. But the storage
+> read that *produced* that handle still happens in the calling function. So:
+> ```solidity
+> // ❌ Won't work as you'd expect — `pure` cannot read storage
+> function check(address u) external pure returns (bool) {
+>     return FHE.isInitialized(_balances[u]); // compile error: pure can't access state
+> }
+>
+> // ✓ Correct — `view` reads the storage slot, then passes the loaded handle
+> //   into the pure check
+> function check(address u) external view returns (bool) {
+>     return FHE.isInitialized(_balances[u]);
+> }
+> ```
+> Rule of thumb: getters that consult `isInitialized` on a stored mapping/state
+> handle must be `view`, not `pure`.
+
+## Lazy-Init Mapping Handles (First-Touch Pattern)
+
+A user-keyed mapping defaults to the zero handle — `bytes32(0)`. You **cannot**
+`FHE.add(uninitialized, x)` without first checking, because the zero handle has
+no ACL and no encrypted value behind it. The canonical accumulator idiom:
+
+```solidity
+mapping(address => euint64) private _balances;
+
+function deposit(externalEuint64 enc, bytes calldata proof) external {
+    euint64 amount = FHE.fromExternal(enc, proof);
+
+    // Branch on the HANDLE (plaintext-level branching is fine — it's not
+    // branching on encrypted data). `isInitialized` is pure, so this is free.
+    euint64 prev = _balances[msg.sender];
+    euint64 next = FHE.isInitialized(prev)
+        ? FHE.add(prev, amount)     // accumulator path
+        : amount;                   // first-touch — store the increment directly
+
+    _balances[msg.sender] = next;
+    FHE.allowThis(next);
+    FHE.allow(next, msg.sender);
+}
+```
+
+This is the single most common mapping-side accumulator pattern in any
+ledger-shaped contract (vault, AMM, payroll, treasury). Use it any time a
+`mapping(address => euintX)` slot may be touched for the first time.
+
+Alternative if you want `isInitialized` semantics without the branch (slightly
+more gas): seed every account on first interaction via a dedicated
+`_initialize(address)` helper that sets `_balances[user] = FHE.asEuint64(0)`
+plus the ACL triple. Pick whichever fits the protocol's UX better.
+
+## Publicly-Readable, ACL-Gated Pattern (Hidden TVL / Reveal-on-Demand)
+
+Sometimes you want a handle to be **publicly readable** (any caller can fetch
+the `bytes32` handle from a getter) but **decryption-gated** (only specific
+users can ask the relayer to decrypt it). Examples: AMM TVL that the protocol
+hides until a periodic reveal; auction reserves visible to the auctioneer but
+hidden from bidders.
+
+The pattern composes three primitives:
+
+```solidity
+// State (encrypted)
+euint64 private _reserveA;
+
+// 1. Anyone can read the HANDLE — no ACL needed for raw storage reads
+function reserveAHandle() external view returns (bytes32) {
+    return FHE.toBytes32(_reserveA);
+}
+
+// 2. Owner-gated: extend decrypt rights to a specific user
+function allowReserveTo(address user) external onlyOwner {
+    FHE.allow(_reserveA, user);   // persistent — survives across tx boundaries
+}
+
+// 3. Owner-gated: open the gates fully
+function revealReserves() external onlyOwner {
+    FHE.makePubliclyDecryptable(_reserveA);
+    // From here, anyone can `relayer.publicDecrypt([reserveAHandle()])`
+}
+```
+
+UX consequence: a frontend that calls `relayer.userDecrypt(...)` on a handle
+the caller hasn't been granted ACL for **gets a relayer rejection**, not a
+contract revert. Display this as "Hidden until reveal" rather than as an
+error state.
 
 ## The Mandatory ACL Pattern
 

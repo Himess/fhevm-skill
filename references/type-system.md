@@ -45,6 +45,8 @@ FHE.add(euintX a, euintX b) returns (euintX)    // a + b (encrypted + encrypted)
 FHE.add(euintX a, uintX b) returns (euintX)     // a + b (encrypted + plaintext)
 FHE.add(uintX a, euintX b) returns (euintX)     // a + b (plaintext + encrypted)
 FHE.sub(euintX a, euintX b) returns (euintX)     // a - b (wraps on underflow)
+FHE.sub(euintX a, uintX b) returns (euintX)      // a - b (encrypted - plaintext) — see note below
+FHE.sub(uintX a, euintX b) returns (euintX)      // a - b (plaintext - encrypted) — see note below
 FHE.mul(euintX a, euintX b) returns (euintX)     // a * b (encrypted × encrypted)
 FHE.mul(euintX a, uintX b) returns (euintX)      // a * b (encrypted × plaintext scalar)
 FHE.mul(uintX a, euintX b) returns (euintX)      // a * b (plaintext scalar × encrypted)
@@ -58,12 +60,36 @@ FHE.max(euintX a, euintX b) returns (euintX)      // encrypted maximum
 **Supported types for arithmetic**: `euint8`, `euint16`, `euint32`, `euint64`, `euint128`
 **NOT supported**: `euint256` (only `neg`), `ebool`, `eaddress`
 
-**Operator overloads** (Solidity operator syntax):
+**No operator overloads.** Despite occasional online examples, `@fhevm/solidity@0.11.x`
+does **NOT** install `using { ... } for euintX` directives or define `operator +`,
+`-`, `*`, `==`, etc. on the encrypted user-defined value types. Code like
+`a + b` where `a, b : euint64` will fail to compile with
+`Operator + not compatible with types euint64 and euint64`. **Always use the
+explicit `FHE.add(a, b)` / `FHE.sub(a, b)` / `FHE.mul(a, b)` calls.**
+
+**Plaintext auto-coercion (add / sub / mul):** When one operand is a Solidity
+unsigned literal or a plain `uintX`, the FHE library accepts it directly — no
+`FHE.asEuintX(...)` wrapper required, and the result type matches the encrypted
+operand. The `(euintX, uintX)` and `(uintX, euintX)` overloads exist for
+`X ∈ {8, 16, 32, 64, 128}`. There is **no** reversed `(uint256, euint256)` overload,
+and **no** `(uintX, euintX)` overload for `div` or `rem` (the encrypted operand
+must be the dividend in those):
+
 ```solidity
-euint64 sum = a + b;    // equivalent to FHE.add(a, b)
-euint64 diff = a - b;   // equivalent to FHE.sub(a, b)
-euint64 prod = a * b;   // equivalent to FHE.mul(a, b)
+// All three lines compile and produce an euint64:
+euint64 a = FHE.add(balance, uint64(100));   // encrypted + plaintext
+euint64 b = FHE.sub(balance, uint64(100));   // encrypted - plaintext
+euint64 c = FHE.sub(uint64(1000), balance);  // plaintext - encrypted
+euint64 d = FHE.mul(balance, uint64(2));     // encrypted * plaintext
+
+// You do NOT need:
+//   euint64 e = FHE.sub(balance, FHE.asEuint64(100));   // works, but wasteful
 ```
+
+Avoid the `FHE.asEuintX(literal)` wrapper for arithmetic operands — it costs an
+extra trivial-encryption gas overhead with zero confidentiality benefit (the
+literal is already public in calldata). The wrapper is only needed when you
+need an `euintX` *handle* in storage or as a `select` argument.
 
 ### Comparison Operations (all return `ebool`)
 

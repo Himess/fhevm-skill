@@ -4,26 +4,110 @@
 
 Unlike regular EVM operations, FHE gas costs are **constant** regardless of the encrypted value. `FHE.add(1, 2)` costs the same as `FHE.add(MAX_UINT64, MAX_UINT64)`. This is by design — variable gas would leak information.
 
-## FHE Operation Costs (HCU — Homomorphic Computation Units)
+## HCU Concept (Homomorphic Compute Units)
 
-Each FHE operation consumes gas on the host chain AND computation on the coprocessor. Costs scale with type width:
+Every FHE operation consumes two budgets simultaneously:
 
-| Operation | euint8 | euint16 | euint32 | euint64 | euint128 | euint256 |
-|-----------|--------|---------|---------|---------|----------|----------|
-| `add/sub` | Low | Low | Low | Medium | High | N/A |
-| `mul` | Medium | Medium | High | High | Very High | N/A |
-| `div/rem` | High | High | High | Very High | Very High | N/A |
-| `eq/ne` | Low | Low | Low | Low | Medium | Medium |
-| `gt/lt/ge/le` | Low | Low | Medium | Medium | High | N/A |
-| `select` | Medium | Medium | Medium | Medium | High | High |
-| `min/max` | Medium | Medium | Medium | Medium | High | N/A |
-| `and/or/xor/not` | Low | Low | Low | Low | Low | Low |
-| `shl/shr` | Low | Low | Medium | Medium | Medium | Medium |
-| `rand` | High | High | High | Very High | Very High | Very High |
+| Budget | Limit | Resets |
+|---|---|---|
+| **EVM gas** | host chain block limit (~30M on Sepolia) | per block |
+| **HCU per transaction** | **20,000,000 HCU** | per tx |
+| **HCU sequential depth** | **5,000,000 HCU** along the longest dependency chain | per tx |
 
-**Key takeaway**: `rand` and `div` are the most expensive. `add`/`sub` and bitwise are cheapest. Always use the smallest type that fits your data.
+If a transaction exceeds *either* the per-tx HCU cap or the depth cap, it
+reverts with a coprocessor error — independent of EVM gas. Depth matters
+because chained operations like `FHE.add(FHE.add(FHE.add(a, b), c), d)`
+accumulate along a single critical path; the same four `add`s done as
+`FHE.add(a, b)` and `FHE.add(c, d)` then `FHE.add(of_two, of_two)` halve the
+depth.
 
-**Batch evaluation tip**: If a function does many FHE operations, consider splitting across multiple transactions to avoid gas limits. Rule of thumb: max ~10-15 FHE operations per transaction for euint64.
+> Source: docs.zama.org `solidity-guides/v0.11/development-guide/hcu` (latest
+> as of fhevm-solidity 0.11.x). Numbers below are quoted verbatim from that
+> page; re-verify after every Zama point release.
+
+## FHE Operation Costs — `euint64` (the most-used width)
+
+| Operation | Scalar (encrypted ⊙ plaintext) | Non-scalar (encrypted ⊙ encrypted) |
+|---|---:|---:|
+| `add` / `sub` | 133,000 | 162,000 |
+| `mul` | 365,000 | 596,000 |
+| `div` | 715,000 | — (encrypted divisor not supported) |
+| `rem` | 1,153,000 | — |
+| `and` / `or` / `xor` | 34,000 | 34,000 |
+| `not` | — | 63 |
+| `shl` / `shr` / `rotl` / `rotr` | 34,000 | ~209,000 |
+| `eq` / `ne` | 83,000–84,000 | 118,000–120,000 |
+| `gt` / `ge` / `lt` / `le` | 116,000–119,000 | 146,000–152,000 |
+| `min` / `max` | ~150,000 | ~218,000 |
+| `neg` | — | 131,000 |
+| `select` | — | 55,000 |
+| `randEuint64` | — | 24,000 |
+
+## FHE Operation Costs — `euint8` (smallest, cheapest)
+
+| Operation | Scalar | Non-scalar |
+|---|---:|---:|
+| `add` / `sub` | 84,000 | 88,000–91,000 |
+| `mul` | 122,000 | 150,000 |
+| `div` | 210,000 | — |
+| `rem` | 440,000 | — |
+| `and` / `or` / `xor` | ~30,000 | ~30,000 |
+| `not` | — | 9 |
+| `shl` / `shr` / `rotl` / `rotr` | ~32,000 | ~91,000 |
+| `eq` / `ne` | 55,000 | 55,000 |
+| `gt` / `ge` / `lt` / `le` | 52,000–58,000 | 58,000–63,000 |
+| `min` / `max` | 84,000–89,000 | 119,000–121,000 |
+| `neg` | — | 79,000 |
+| `select` | — | 55,000 |
+| `randEuint8` | — | 23,000 |
+
+## Constants and trivial operations
+
+| Operation | HCU |
+|---|---:|
+| `cast` (euintX → euintY) | 32 |
+| `trivialEncrypt` (`FHE.asEuintX(plaintext)`) | 32 |
+| `randBounded` | 23,000–30,000 |
+
+## Boolean operations (`ebool`)
+
+| Operation | Scalar | Non-scalar |
+|---|---:|---:|
+| `and` | 22,000 | 25,000 |
+| `or` | 22,000 | 24,000 |
+| `xor` | 2,000 | 22,000 |
+| `not` | — | 2 |
+| `select` | — | 55,000 |
+| `randEbool` | — | 19,000 |
+
+## Operation cost — cheap → expensive (for `euint64`)
+
+1. `cast` / `trivialEncrypt` — 32 HCU (effectively free)
+2. `not` — 63 HCU
+3. `randEuint64` — 24,000 HCU (much cheaper than common belief — `rand` is **not** "very expensive")
+4. `and` / `or` / `xor` — 34,000 HCU
+5. `select` — 55,000 HCU (constant across widths)
+6. `eq` / `ne` — 83,000–120,000 HCU
+7. `gt` / `ge` / `lt` / `le` — 116,000–152,000 HCU
+8. `add` / `sub` — 133,000–162,000 HCU
+9. `min` / `max` — 150,000–219,000 HCU
+10. `shl` / `shr` / `rotl` / `rotr` — 34,000 (scalar) / ~209,000 (non-scalar)
+11. `mul` — 365,000–596,000 HCU
+12. `div` — 715,000 HCU (plaintext divisor only)
+13. `rem` — 1,153,000 HCU (plaintext divisor only) — **most expensive**
+
+**Headroom math:** with euint64 `add` at 162,000 HCU and a 20,000,000 HCU
+per-tx cap, you have room for **~123 chained encrypted adds** in a single
+transaction (or ~33 `mul`s, or ~17 `rem`s) before hitting the cap. Sequential
+depth (5M) caps the *longest dependency chain* at ~30 chained adds; widen the
+chain (parallelize independent ops) to reclaim depth.
+
+**Key takeaways:**
+- `rem` and `div` dominate cost — avoid encrypted modular arithmetic in hot paths.
+- `select` is a flat 55,000 HCU regardless of type width — cheap to use.
+- `rand` is **cheap** (~23k–24k HCU); the cost is dwarfed by any subsequent op.
+- `xor` on `ebool` (2,000 HCU) is the cheapest non-trivial primitive in the system.
+- Scalar variants are 5–30 % cheaper than non-scalar — prefer plaintext literals where possible.
 
 ## Optimization Strategies
 
@@ -233,22 +317,4 @@ function withdrawFees() external onlyOwner {
 
 **Tip**: For high-volume contracts, accumulate fees encrypted and withdraw periodically. This avoids per-transaction fee transfers (expensive). If you need the fee amount in plaintext (for accounting), use `makePubliclyDecryptable` on `_accumulatedFees` before withdrawal.
 
-## Gas Cost Relative Comparison
-
-Operations from cheapest to most expensive (approximate):
-
-1. `FHE.isInitialized()` — pure function, no gas
-2. `FHE.asEuintX(plaintext)` — trivial encryption
-3. `FHE.not()`, `FHE.neg()` — unary operations
-4. `FHE.and()`, `FHE.or()`, `FHE.xor()` — bitwise
-5. `FHE.add()`, `FHE.sub()` — arithmetic (scalar operand cheaper)
-6. `FHE.eq()`, `FHE.ne()` — equality comparison
-7. `FHE.mul()` — multiplication
-8. `FHE.ge()`, `FHE.gt()`, `FHE.le()`, `FHE.lt()` — ordering comparison
-9. `FHE.min()`, `FHE.max()` — combined comparison + select
-10. `FHE.select()` — ternary
-11. `FHE.div()`, `FHE.rem()` — division (most expensive arithmetic)
-12. `FHE.shl()`, `FHE.shr()` — shifts
-13. `FHE.randEuintX()` — random generation (most expensive overall)
-
-**All costs increase with type bit-width**: euint8 operations are cheaper than euint64, which are cheaper than euint128.
+**All costs increase with type bit-width**: euint8 operations are cheaper than euint64, which are cheaper than euint128. The numeric tables above are the source of truth — the qualitative ordering on this page is a quick-reference summary only.

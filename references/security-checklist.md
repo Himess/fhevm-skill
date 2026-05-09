@@ -69,9 +69,24 @@
 - [ ] Escrow/vault contracts: state changes BEFORE external token calls (CEI pattern)
 - [ ] Token operator permissions: document that users must call `setOperator` before interacting
 
+### Privileged-Role Pattern Selection
+
+Choose the lightest tool that fits the role:
+
+| Role profile | Use | Reason |
+|---|---|---|
+| Admin == deployer, may transfer in future | `Ownable2Step` | Standard, two-step transfer prevents fat-finger |
+| Privileged role IS NOT the deployer (e.g., constructor takes a `seller` / `treasury` arg) | `address public immutable` + `if (msg.sender != role) revert NotRole();` | Cheaper gas, simpler ABI, no transfer surface to misuse |
+| Multiple distinct roles (admin / oracle / pauser) | `AccessControlEnumerable` (OpenZeppelin) | Granular per-role grant/revoke |
+| Role behind a multisig | `Ownable` + multisig as the owner address | The multisig handles transfer/rotation; contract stays simple |
+
+The auction template (`templates/blind-auction.sol`) uses `Ownable2Step` because the
+deployer IS the seller. A "vault contract that pays a hard-coded recipient at construction"
+would be cleaner with `address public immutable recipient;` instead.
+
 ### Protocol-Level Security
 
-- [ ] `Ownable2Step` used instead of `Ownable` (prevents accidental ownership transfer)
+- [ ] `Ownable2Step` used instead of `Ownable` when role == deployer (prevents accidental ownership transfer)
 - [ ] `ReentrancyGuard` on all state-changing functions that interact with FHE
 - [ ] `Pausable` for emergency stop capability
 - [ ] Rate limiting on FHE-heavy functions (prevent gas griefing / DoS)
@@ -115,9 +130,11 @@
 
 ### 5. Balance Change Detection
 
-**Attack**: Compare encrypted balance handles before/after to detect if a transfer succeeded.
+**Attack**: An attacker compares encrypted balance handles before/after to deduce whether a transfer transferred a non-zero amount, leaking the underlying value.
 
-**Mitigation**: This is partially mitigable — handles always change after any FHE operation. However, if a transfer of 0 is forced (silent failure), the sender's handle MAY not change. Consider always touching the sender's balance (even for 0 transfers) to ensure the handle changes.
+**Why it fails**: Handles **always change** after any FHE op — `_update` runs `FHE.sub` and `FHE.add` on the sender and recipient sides regardless of whether the conditional `select` chose `amount` or `0`. The new ciphertext is non-deterministic by design (every encryption produces fresh randomness), so handle inequality contains no information about the underlying value. **The before/after comparison gives the attacker nothing.**
+
+**Mitigation**: None needed — the protocol already prevents this. If you're writing a custom non-ERC-7984 token, just make sure the `_update` path executes the `FHE.sub`/`FHE.add` unconditionally (using `FHE.select(success, amount, 0)`) so the handle change happens on both branches. This is the standard ERC-7984 pattern (`ERC7984.sol::_update`).
 
 ### 6. Front-Running Encrypted Transactions
 

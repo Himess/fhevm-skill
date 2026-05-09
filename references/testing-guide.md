@@ -271,6 +271,21 @@ describe("Sepolia-only tests", function () {
 
 ### Pattern 7: Test Public Decryption Flow (checkSignatures)
 
+> **⚠ Return shape — read this first.** `await fhevm.publicDecrypt(handles)` returns
+> an **OBJECT**, not a flat record:
+> ```ts
+> { clearValues: Record<HandleHex, bigint>, abiEncodedClearValues: Hex, decryptionProof: Hex }
+> ```
+> Always access individual values via `result.clearValues[handle]`.
+> **Do NOT do `result[handle]`** — that returns `undefined` and crashes downstream
+> with `HardhatError: HH17: The input value cannot be normalized to a BigInt`.
+>
+> **Recommended contract pattern:** expose a dedicated `function totalHandle()
+> external view returns (bytes32) { return FHE.toBytes32(_encrypted); }` view per
+> handle you intend to publicly decrypt. Then `await fhevm.publicDecrypt([await
+> contract.totalHandle()])` is unambiguous regardless of whether the underlying
+> handle would otherwise come back as bigint or hex string.
+
 Use `fhevm.publicDecrypt(handles)` to get the cleartext values AND the KMS proof, then pass both to your contract's reveal function:
 
 ```typescript
@@ -278,25 +293,27 @@ it("should reveal results via public decryption", async function () {
     // Setup: voting contract where votes are encrypted
     await contract.endVoting();  // Calls FHE.makePubliclyDecryptable internally
 
-    // Get the encrypted handles
-    const yesHandle = await contract.getYesVotesHandle();
-    const noHandle = await contract.getNoVotesHandle();
+    // Recommended: expose dedicated `bytes32` view functions per handle.
+    const yesHandle = await contract.yesHandle();  // returns bytes32 via FHE.toBytes32
+    const noHandle  = await contract.noHandle();
 
     // Use publicDecrypt to get cleartexts + KMS proof (works in both mock and real FHE)
     const handles = [yesHandle, noHandle];
     const decrypted = await fhevm.publicDecrypt(handles);
-    // decrypted.clearValues[handle] → bigint
-    // decrypted.abiEncodedClearValues → bytes (for on-chain checkSignatures)
-    // decrypted.decryptionProof → bytes (KMS signatures)
+    //   decrypted.clearValues             — Record<HandleHex, bigint>
+    //   decrypted.abiEncodedClearValues   — Hex (for on-chain checkSignatures)
+    //   decrypted.decryptionProof         — Hex (KMS signatures)
 
-    // Pass both to the contract's reveal function
+    // Pass both blobs to the contract's reveal function
     await contract.revealResults(
         decrypted.abiEncodedClearValues,
         decrypted.decryptionProof,
     );
 
-    // Verify the revealed values
+    // ✅ Correct accessor:
     const clearYes = decrypted.clearValues[yesHandle];
+    // ❌ WRONG: const clearYes = decrypted[yesHandle];   // returns undefined
+
     expect(await contract.revealedYes()).to.equal(clearYes);
 });
 ```
@@ -330,6 +347,22 @@ const value = result.clearValues[handleAsHexString]; // bigint
 ```
 
 **Do NOT pass empty proof `"0x"`** — the KMSVerifier rejects empty proofs even in mock mode. Always use the proof from `fhevm.publicDecrypt()`.
+
+### Asserting Constructor Reverts
+
+When a constructor reverts (e.g., bad arg validation), there is no contract instance to call `expect(...)` on. Assert against the **factory's `deploy()` call**:
+
+```typescript
+it("rejects fewer than 3 choices in constructor", async function () {
+    const factory = await ethers.getContractFactory("MultiVote");
+    await expect(
+        factory.deploy(govToken.address, ["only-one"], 3600)
+    ).to.be.revertedWithCustomError(factory, "InvalidChoiceCount");
+    //                              ↑ factory, NOT a contract instance
+});
+```
+
+The custom-error ABI lookup uses the factory's interface, not the (non-existent) instance.
 
 ### Testing finalizeUnwrap (Async 2-Step Unwrap)
 
@@ -433,6 +466,34 @@ expect(ticketNumber).to.be.lessThan(1000n); // If bounded to [0,1000)
 expect(ticketNumber).to.be.greaterThanOrEqual(0n);
 ```
 
+### Mock Mode Gotcha: Decrypting an Uninitialized Handle Throws
+
+`fhevm.userDecryptEuint(...)` (and `userDecryptEbool` / `userDecryptEaddress`) **rejects** when the handle is the zero handle (i.e. the storage slot has never been touched by any FHE operation). The mock-utils path is:
+
+```
+Error: Handle is not initialized
+  at FhevmHandle.verify  (.../@fhevm/mock-utils/fhevm/FhevmHandle.ts)
+  at userDecryptHandleBytes32 (.../@fhevm/mock-utils/fhevm/userDecrypt.ts)
+  at Proxy.userDecryptEuint (.../@fhevm/hardhat-plugin/src/internal/FhevmExternalAPI.ts)
+```
+
+This is a real foot-gun for "before payroll runs, every employee's balance is 0" style assertions:
+
+```typescript
+// ❌ THROWS "Handle is not initialized" — alice has never received tokens
+expect(await decryptBalance(alice)).to.equal(0n);
+
+// ✅ Correct: only assert post-state, after at least one transfer to that address
+await runPayroll();
+expect(await decryptBalance(alice)).to.equal(salary);
+```
+
+**Workarounds when you really need to check "balance is zero":**
+
+1. **Skip the assertion** — assert only the post-state delta.
+2. **Initialize defensively** — have the contract `_mint(addr, FHE.asEuint64(0))` or otherwise touch the handle once before tests measure it.
+3. **Catch + assert error message** — `await expect(decryptBalance(alice)).to.be.rejectedWith("not initialized")` if you want to assert "this user has never received tokens".
+
 ### Mock Mode Edge Case: Constructor-Initialized Handles
 
 Handles created in the constructor via `FHE.asEuint64(0)` (trivial encryption with no FHE operation) may fail `publicDecrypt` in mock mode with `KMSInvalidSigner`. This happens because the mock KMS only tracks handles that have gone through at least one FHE operation.
@@ -510,6 +571,29 @@ expect(reverted).to.be.true;
 - ACL checks fail at the plugin level (not on-chain)
 - Input proof validation fails in mock mode
 - `ERC7984ZeroBalance` — trying to transfer from an uninitialized balance (also thrown at plugin level)
+- **A plain revert that happens AFTER a successful FHE-input tx in the same test** (subtle, easy to miss). Specifically: `FhevmProviderExtender._handleEthSendTransaction` wraps the upstream `ProviderError` as `HardhatFhevmError("Fhevm assertion failed")` for the second tx in the test. `revertedWithCustomError` then doesn't fire even though the revert reason on-chain is the right custom error.
+
+```typescript
+// PATTERN THAT TRIGGERS THE WRAP — a register tx (with FHE input) followed by an unauthorized tx:
+await contract.registerEmployee(alice.address, encSalary, proof);  // FHE-input tx — succeeds
+await expect(
+    contract.connect(notEmployer).removeEmployee(alice.address)
+).to.be.revertedWithCustomError(contract, "NotEmployer");
+// ❌ Above fails: HardhatFhevmError: Fhevm assertion failed (the custom error is swallowed)
+
+// WORKAROUND — try/catch + state assertion:
+let reverted = false;
+try {
+    await contract.connect(notEmployer).removeEmployee(alice.address);
+} catch (e: any) {
+    reverted = true;
+    // Optional: assert the underlying message contains your custom error name
+    expect(String(e)).to.match(/NotEmployer|assertion failed/);
+}
+expect(reverted).to.equal(true);
+// And verify the on-chain state DID NOT change:
+expect(await contract.isRegistered(alice.address)).to.equal(true);
+```
 
 **When is `.to.be.reverted` fine?** For purely on-chain reverts that don't involve encrypted inputs:
 ```typescript
@@ -520,7 +604,7 @@ await expect(contract.connect(alice).endVoting()).to.be.reverted; // plaintext r
 
 ### fhevm Plugin Scope: Tests Only
 
-The `fhevm` object (from `import { fhevm } from "hardhat"`) is **only available inside the Mocha test runner** (i.e., files run via `npx hardhat test`). It is NOT available in scripts run via `npx hardhat run`:
+The `fhevm` object (from `import { fhevm } from "hardhat"`) is **only available inside the Mocha test runner** (i.e., files run via `npx hardhat test`). It is NOT available in scripts run via `npx hardhat run`. The plugin auto-initializes the coprocessor mock for `hardhat test` but not for `hardhat run`:
 
 ```typescript
 // ✅ WORKS — test file (npx hardhat test)
@@ -560,9 +644,18 @@ async function main() {
 main().catch(console.error);
 ```
 
+> **Tip — for local mock-mode scripts (deployment + sanity check on the `hardhat`
+> network), prefer a `it.only` test under `test/` over `scripts/foo.ts`.** The
+> mock coprocessor is only auto-initialized by `npx hardhat test`. A
+> `scripts/foo.ts` file run via `npx hardhat run` against the in-memory
+> `hardhat` network will deploy fine but encrypted inputs will revert with
+> `coprocessor not initialized`. If you must keep it as a script, add the
+> coprocessor wiring manually — easier to just write a test that exits after
+> the assertions you care about.
+
 ## Hardhat Plugin Helper APIs
 
-Beyond `createEncryptedInput` and `userDecryptEuint`, the `@fhevm/hardhat-plugin` provides several helpers:
+Beyond `createEncryptedInput` and `userDecryptEuint`, the `@fhevm/hardhat-plugin` runtime provides several helpers:
 
 ```typescript
 // Simpler single-value encryption (no builder chain)
@@ -585,7 +678,21 @@ await fhevm.assertCoprocessorInitialized(contract);  // Verify contract is set u
 const matcher = fhevm.revertedWithCustomErrorArgs("ERC7984", "ERC7984UnauthorizedSpender");
 ```
 
-These helpers simplify common test patterns and provide better error messages.
+> **Strict-TS gotcha.** These helpers exist on the runtime implementation
+> (`FhevmExternalAPI` class) but are **not** declared on the public
+> `HardhatFhevmRuntimeEnvironment` interface that `hre.fhevm` is typed against
+> (verified in `node_modules/@fhevm/hardhat-plugin/_types/types.d.ts`). Calling
+> `fhevm.encryptUint(...)` works at runtime but trips
+> `Property 'encryptUint' does not exist on type 'HardhatFhevmRuntimeEnvironment'`
+> under strict TypeScript. Workarounds:
+> ```ts
+> // Option A — cast (cheap):
+> await (fhevm as any).encryptUint(FhevmType.euint64, 1000n, addr, signer.address);
+> // Option B — prefer the typed builder, which IS on the public interface:
+> await fhevm.createEncryptedInput(addr, signer.address).add64(1000n).encrypt();
+> ```
+> If the goal is a one-liner, Option B is only one line longer and stays
+> type-safe.
 
 ## Running Tests
 

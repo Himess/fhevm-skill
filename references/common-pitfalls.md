@@ -167,7 +167,7 @@ function getVestedAmount(address user) public returns (euint64) {
 }
 ```
 
-**Why**: ALL FHE operations (`add`, `sub`, `mul`, `div`, `select`, `eq`, `gt`, `min`, `max`, `rand`, etc.) produce new handles by sending computation requests to the coprocessor. This counts as state modification. Only `FHE.isInitialized()`, `FHE.isAllowed()`, `FHE.isSenderAllowed()`, and `FHE.isPubliclyDecryptable()` are true view functions.
+**Why**: ALL FHE operations (`add`, `sub`, `mul`, `div`, `select`, `eq`, `gt`, `min`, `max`, `rand`, etc.) produce new handles by sending computation requests to the coprocessor. This counts as state modification. The only state-free helpers are `FHE.isInitialized` (pure), and the view-safe set: `FHE.isAllowed`, `FHE.isSenderAllowed`, `FHE.isPubliclyDecryptable`, `FHE.isAccountDenied`, `FHE.isUserDecryptable`, `FHE.isDelegatedForUserDecryption`, `FHE.getDelegatedUserDecryptionExpirationDate`. See `references/acl-patterns.md` § ACL Check Functions for signatures.
 
 ## High-Impact Pitfalls (Subtle Bugs)
 
@@ -186,14 +186,24 @@ function transfer(address to, euint64 amount) external {
 }
 ```
 
-**Detection heuristic** (off-chain):
+**Detection** (off-chain). Handle equality does **NOT** work — every FHE op
+(including no-op `select(false, x, x)`) produces a fresh non-deterministic
+ciphertext, so the handle changes after every transfer regardless of whether
+any value moved. The only reliable signal is to decrypt:
+
 ```typescript
-// Compare sender's balance handle before and after
-const handleBefore = await token.balanceOf(sender);
-await token.transfer(recipient, encAmount, proof);
-const handleAfter = await token.balanceOf(sender);
-// If handleBefore === handleAfter, the transfer likely failed (0 transferred)
+// Reliable: decrypt the recipient's balance before and after, check it grew.
+const before = await fhevm.userDecryptEuint(FhevmType.euint64,
+    await token.confidentialBalanceOf(recipient.address), tokenAddr, recipient);
+await tx;
+const after  = await fhevm.userDecryptEuint(FhevmType.euint64,
+    await token.confidentialBalanceOf(recipient.address), tokenAddr, recipient);
+if (after - before !== expectedAmount) throw new Error("silent partial transfer");
+
+// Or: parse the ConfidentialTransfer event and decrypt its `amount` handle.
 ```
+
+Comparing handles before / after gives you no information.
 
 ### 7. Input Proofs Bound to msg.sender
 
@@ -328,7 +338,7 @@ function transferFrom(...) {
 
 ## Medium-Impact Pitfalls (Performance & Design)
 
-### 11. Using `FHE.allow()` When `FHE.allowTransient()` Suffices
+### 13. Using `FHE.allow()` When `FHE.allowTransient()` Suffices
 
 ```solidity
 // WASTEFUL: persistent storage write for single-tx use
@@ -340,7 +350,7 @@ FHE.allowTransient(tempValue, address(otherContract));
 otherContract.process(tempValue);
 ```
 
-### 12. Using Larger Types Than Necessary
+### 14. Using Larger Types Than Necessary
 
 ```solidity
 // WASTEFUL: euint256 for a boolean flag
@@ -352,7 +362,7 @@ ebool isActive = FHE.asEbool(true);
 
 Gas increases with type width. Use `euint8` for small values, `euint64` for amounts.
 
-### 13. Re-encrypting Constants in Loops
+### 15. Re-encrypting Constants in Loops
 
 ```solidity
 // WASTEFUL: creates a new encrypted zero each iteration
@@ -368,7 +378,7 @@ for (uint i = 0; i < recipients.length; i++) {
 }
 ```
 
-### 14. Emitting Plaintext in Events
+### 16. Emitting Plaintext in Events
 
 ```solidity
 // WRONG: defeats the purpose of encryption
@@ -380,15 +390,97 @@ emit Transfer(from, to);
 emit Transfer(from, to, FHE.toBytes32(encAmount));
 ```
 
-### 15. Not Using Operator Overloads for Readability
+### 17. Trying to Use Operator Overloads (`+`, `-`, `*`)
+
+**Severity**: Medium — fails to compile, confuses agents who saw operator
+overloads in pre-0.11 examples or in the legacy `TFHE` library.
+
+`@fhevm/solidity@0.11.x` does **NOT** ship operator overloads for the encrypted
+user-defined value types (`euintX`, `ebool`, `eaddress`). There is no
+`using { ... } for euintX` directive in `FHE.sol`. Writing `a + b` where
+`a, b : euint64` produces:
+
+```
+TypeError: Operator + not compatible with types euint64 and euint64
+```
+
+**Always use the explicit calls:**
 
 ```solidity
-// VERBOSE:
-euint64 result = FHE.add(FHE.mul(price, quantity), fee);
-
-// CLEANER: operator overloads available for +, -, *
+// ❌ WRONG — does not compile
 euint64 result = price * quantity + fee;
+
+// ✓ CORRECT
+euint64 result = FHE.add(FHE.mul(price, quantity), fee);
 ```
+
+The plaintext-coercion overloads still apply (e.g. `FHE.mul(price, uint64(2))`),
+so explicit calls are not as verbose as they look.
+
+### 18. Top-K Ranking Pattern (Vickrey, Top-N Auctions, Median, etc.)
+
+**Severity**: Medium — common DeFi/auction primitive that has no built-in support
+
+There is no encrypted sort, no encrypted argmax, no `FHE.indexOf`. To find the
+**top-K** of N encrypted bids, use a chained `FHE.gt` + `FHE.select` reduction.
+The cost is O(N · K) FHE comparisons.
+
+**Pattern: top-1 (highest bid + bidder)**
+
+```solidity
+euint64 best = FHE.asEuint64(0);
+eaddress bestAddr = FHE.asEaddress(address(0));
+FHE.allowThis(best);
+FHE.allowThis(bestAddr);
+
+for (uint256 i = 0; i < bidders.length; i++) {
+    euint64 b = bids[bidders[i]];
+    ebool isBetter = FHE.gt(b, best);
+    best     = FHE.select(isBetter, b, best);
+    bestAddr = FHE.select(isBetter, FHE.asEaddress(bidders[i]), bestAddr);
+    FHE.allowThis(best);
+    FHE.allowThis(bestAddr);
+}
+```
+
+**Pattern: top-2 (Vickrey — winner pays second-highest)**
+
+Run two passes. Pass 1 finds the highest. Pass 2 finds the highest **excluding**
+the winner using `FHE.select` to mask the winner's bid to zero:
+
+```solidity
+// Pass 1: find first place (best, bestAddr) as above.
+
+// Pass 2: find second place
+euint64 second = FHE.asEuint64(0);
+FHE.allowThis(second);
+for (uint256 i = 0; i < bidders.length; i++) {
+    ebool isWinner = FHE.eq(FHE.asEaddress(bidders[i]), bestAddr);
+    // Mask winner's bid to 0 so it can't win again
+    euint64 candidate = FHE.select(isWinner, FHE.asEuint64(0), bids[bidders[i]]);
+    ebool isBetter = FHE.gt(candidate, second);
+    second = FHE.select(isBetter, candidate, second);
+    FHE.allowThis(second);
+}
+// `second` is now the price the winner pays in a Vickrey auction
+```
+
+**Why no shortcut works:**
+- `FHE.max` exists for two values, but cannot return *which* of N values won —
+  you'd lose the index/address.
+- Sorting requires either control flow on encrypted values (forbidden — see
+  pitfall #2) or a constant-time sorting network, which is N² comparisons and
+  far more expensive than the O(N · K) reduction above.
+- Running the reduction off-chain in the relayer would leak ordering information
+  the contract is supposed to hide.
+
+**Gas envelope (rough, mock-mode):** ~30 bidders × top-2 ≈ ~60 FHE.gt + ~120
+FHE.select. Stays under the block gas limit but is the dominant cost of any
+auction settle() call. Keep N bounded (cap participants per round, batch by
+round, or split into K-way trees if N > 50).
+
+**Real example:** see `templates/vickrey-auction.sol` for a full working contract
+with 12 passing tests.
 
 ## Battle Scars (Real Production Lessons)
 

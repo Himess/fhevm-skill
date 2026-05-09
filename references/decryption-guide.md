@@ -10,6 +10,15 @@ FHEVM supports three decryption models:
 | **Public Decryption** | Everyone | Auction results, vote tallies, unwrap amounts |
 | **Delegated Decryption** | A delegate on behalf of owner | Backend services, custodial setups |
 
+> **Forward-looking note (fhevm v0.12, April 2026).** The protocol now supports
+> **context-aware decryption** via an `extraData` field bound to each ciphertext
+> for replay protection across different consumers. The new
+> `@zama-fhe/sdk@3.x` already speaks this protocol. The legacy
+> `@zama-fhe/relayer-sdk@0.4.x` shown below works against v0.11 contracts. If
+> you upgrade contracts to v0.12, also upgrade to `relayer-sdk@0.5.0-alpha` or
+> migrate the frontend to `@zama-fhe/sdk@3.x`. Symptom of mismatch:
+> `extraDataMismatch` errors at decrypt time.
+
 ## User Decryption (EIP-712 Flow)
 
 The user proves ownership via an EIP-712 signature, and the Relayer/KMS re-encrypts the value with the user's ephemeral public key.
@@ -17,16 +26,20 @@ The user proves ownership via an EIP-712 signature, and the Relayer/KMS re-encry
 ### Full Frontend Flow
 
 ```typescript
-import { createInstance, SepoliaConfig } from '@zama-fhe/relayer-sdk';
+// IMPORTANT: the package has NO root export. Always import from /web (browser)
+// or /node (Node.js / Hardhat scripts). The plain `@zama-fhe/relayer-sdk`
+// specifier is not in the package.json `exports` map and will fail to resolve.
+import { createInstance, SepoliaConfig } from '@zama-fhe/relayer-sdk/web';
+import { ethers } from 'ethers';
 
 // 1. Initialize the SDK
 const fhevm = await createInstance({
     ...SepoliaConfig,
-    network: provider,
+    network: provider,           // window.ethereum (browser) or RPC URL string (node)
 });
 
 // 2. Get the encrypted handle from the contract
-const encryptedBalance = await contract.balanceOf(userAddress);
+const encryptedBalance = (await contract.balanceOf(userAddress)) as bigint;
 
 // 3. Generate an ephemeral keypair
 const keypair = fhevm.generateKeypair();
@@ -44,9 +57,11 @@ const eip712 = fhevm.createEIP712(
 );
 
 // 5. User signs with their wallet (MetaMask popup)
+//    `eip712.types.UserDecryptRequestVerification` is `readonly` in 0.4.1.
+//    ethers v6 `signTypedData` wants a mutable `TypedDataField[]` — spread:
 const signature = await signer.signTypedData(
     eip712.domain,
-    { UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification },
+    { UserDecryptRequestVerification: [...eip712.types.UserDecryptRequestVerification] },
     eip712.message,
 );
 
@@ -55,7 +70,7 @@ const result = await fhevm.userDecrypt(
     [{ handle: encryptedBalance, contractAddress }],
     keypair.privateKey,
     keypair.publicKey,
-    signature.replace('0x', ''),
+    signature.slice(2),  // strip the leading "0x" before sending to the relayer
     contractAddresses,
     signer.address,
     startTimestamp,
@@ -63,8 +78,8 @@ const result = await fhevm.userDecrypt(
 );
 
 // 7. Read the decrypted value
-// IMPORTANT: encryptedBalance from ethers is a bigint — convert to 32-byte hex for lookup
-const hexHandle = ethers.toBeHex(encryptedBalance, 32);
+// `result` (UserDecryptResults) is keyed by `0x${string}`. Convert + cast:
+const hexHandle = ethers.toBeHex(encryptedBalance, 32) as `0x${string}`;
 const clearBalance = result[hexHandle];  // bigint
 console.log("Balance:", clearBalance.toString());
 ```
@@ -167,6 +182,71 @@ function fulfillDecryption(
 }
 ```
 
+### Single-Handle Variant (one value to reveal)
+
+For contracts that publish a single encrypted total (tip jar, lottery winner, treasury balance):
+
+```solidity
+function revealTotal(
+    bytes calldata abiEncodedCleartexts,
+    bytes calldata decryptionProof
+) external {
+    bytes32[] memory handlesList = new bytes32[](1);
+    handlesList[0] = FHE.toBytes32(_encryptedTotal);
+
+    FHE.checkSignatures(handlesList, abiEncodedCleartexts, decryptionProof);
+
+    // Single value: still decode as uint256, then cast to your width.
+    uint256 raw = abi.decode(abiEncodedCleartexts, (uint256));
+    revealedTotal = uint64(raw);
+}
+```
+
+For an `eaddress` reveal: `address(uint160(uint256RawValue))`.
+
+### Decoding N Cleartexts When N Is Dynamic
+
+`abi.decode` requires a static tuple. For multi-option voting / multi-bucket
+accumulators where N is set at construction time (e.g. 3..5 choices), use one of
+two patterns:
+
+**Option A — Fixed maximum, ignore extras (simplest):**
+
+```solidity
+// Constructor enforces N <= 5:
+constructor(string[] memory choices) { require(choices.length <= 5, "max 5"); ... }
+
+// Decode as if always 5; trust checkSignatures already validated arity.
+(uint256 v0, uint256 v1, uint256 v2, uint256 v3, uint256 v4) =
+    abi.decode(abiEncodedCleartexts, (uint256, uint256, uint256, uint256, uint256));
+uint256[5] memory raws = [v0, v1, v2, v3, v4];
+for (uint256 i = 0; i < numChoices; i++) {
+    revealedTallies[i] = uint64(raws[i]);
+}
+```
+
+**Option B — Calldata loop (truly dynamic):**
+
+```solidity
+// Cleartexts are packed back-to-back, 32 bytes each, no length prefix.
+// Read the first numChoices words.
+require(abiEncodedCleartexts.length == numChoices * 32, "arity mismatch");
+for (uint256 i = 0; i < numChoices; i++) {
+    uint256 raw;
+    assembly {
+        // calldatacopy from abiEncodedCleartexts.offset + i*32
+        // Position: abiEncodedCleartexts is bytes calldata, raw bytes start
+        // immediately after its length-prefixed header in calldata.
+        let off := add(abiEncodedCleartexts.offset, mul(i, 32))
+        raw := calldataload(off)
+    }
+    revealedTallies[i] = uint64(raw);
+}
+```
+
+Option A is recommended for contracts with a small fixed-max N — it's safer and
+type-checked. Option B is only worth it if your N is large or fully unbounded.
+
 ### Verification Functions
 
 ```solidity
@@ -188,17 +268,57 @@ FHE.isPublicDecryptionResultValid(
 
 ## Delegated Decryption
 
-For backend services or custodial setups where a different address decrypts on behalf of the data owner.
+For backend services or custodial setups where a different address decrypts on
+behalf of the data owner.
 
-### On-Chain: Owner Delegates Permission
+### Three Distinct Flows — Pick One Before You Start Coding
+
+The skill (and the FHEVM docs in general) sometimes blur three patterns under
+one heading. They are NOT interchangeable. Read this disambiguation first:
+
+| Flow | Who is the delegator? | On-chain `FHE.delegateUserDecryption` call needed? | Where the EIP-712 is signed |
+|---|---|---|---|
+| **(1) Off-chain only (EOA)** | An EOA (the data owner) | **No** — relayer accepts the EIP-712 alone | EOA-side, in the user's wallet |
+| **(2) On-chain smart-contract custody** | A custodial contract that holds rights to data living on a *different* contract | **Yes** — the custodian contract calls `FHE.delegateUserDecryption(delegate, dataContract, exp)` | Optional EIP-712 from the delegate; on-chain delegation alone may suffice depending on relayer policy |
+| **(3) Hybrid** | Both an on-chain delegation *and* an off-chain EIP-712 — used when the protocol wants on-chain attestation + KMS authentication | **Yes** | Yes |
+
+**Most user-flows are (1).** A user lets a backend decrypt their own data — the
+EIP-712 the user signs is enough; the relayer enforces the delegation by
+checking the signature. **No on-chain call is required.**
+
+### ⚠ Critical constraint for flow (2)
+
+`FHE.delegateUserDecryption` reverts with `SenderCannotBeContractAddress()` if
+called with `contractAddress == address(this)` of the calling contract. **A
+contract cannot delegate decryption of its OWN handles via the on-chain
+function.** This applies even when the contract's caller is the EOA owner of
+the data — the ACL check looks at `msg.sender == contractAddress`, not at the
+EOA.
+
+Two valid resolutions:
+
+1. **Use flow (1) instead** — let the EOA sign the EIP-712 directly via
+   `createDelegatedUserDecryptEIP712`, send it to the relayer, no on-chain
+   call needed. This is what 90% of "delegate my balance to a backend"
+   use cases actually want.
+2. **Route flow (2) through a separate helper contract** — deploy a
+   `DelegationHelper` whose `address(this)` differs from the contract that
+   holds the data. The helper calls `FHE.delegateUserDecryption(delegate,
+   dataContract, exp)` with `dataContract != address(this)`, which is allowed.
+   This is only useful when the data-holding contract has no EOA owner (e.g.
+   protocol-owned funds).
+
+### On-Chain: Custody Contract Delegates (Flow 2 only)
 
 ```solidity
-// The data owner delegates decryption rights to a backend address
-FHE.delegateUserDecryption(
-    backendAddress,      // delegate
-    contractAddress,     // which contract's data
-    expirationTimestamp  // when delegation expires (Unix timestamp)
-);
+// Inside a DEDICATED helper contract (not the data-holding contract):
+function delegateForCustomer(
+    address delegate,
+    address dataContract,   // ← MUST be a different contract from this one
+    uint256 expirationTs
+) external onlyOwner {
+    FHE.delegateUserDecryption(delegate, dataContract, expirationTs);
+}
 ```
 
 ### Off-Chain: Delegate Requests Decryption
@@ -215,9 +335,10 @@ const eip712 = fhevm.createDelegatedUserDecryptEIP712(
 );
 
 // Delegate signs
+//   Spread the readonly tuple — same fix as user-decrypt above.
 const signature = await delegateSigner.signTypedData(
     eip712.domain,
-    { DelegatedUserDecryptRequestVerification: eip712.types.DelegatedUserDecryptRequestVerification },
+    { DelegatedUserDecryptRequestVerification: [...eip712.types.DelegatedUserDecryptRequestVerification] },
     eip712.message,
 );
 
@@ -226,7 +347,7 @@ const result = await fhevm.delegatedUserDecrypt(
     [{ handle: encryptedHandle, contractAddress }],
     keypair.privateKey,
     keypair.publicKey,
-    signature.replace('0x', ''),
+    signature.slice(2),  // strip the leading "0x" before sending to the relayer
     contractAddresses,
     delegatorAddress,    // The original data owner
     delegateSigner.address,

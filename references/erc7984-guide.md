@@ -1,5 +1,23 @@
 # ERC-7984: Confidential Token Standard
 
+> **Quick imports** (memorize these — they trip up most newcomers):
+> ```solidity
+> // Implementation base (your token contract extends this):
+> import {ERC7984} from "@openzeppelin/confidential-contracts/token/ERC7984/ERC7984.sol";
+>
+> // Interface for cross-contract use (escrow / vault / DEX → token):
+> import {IERC7984} from "@openzeppelin/confidential-contracts/interfaces/IERC7984.sol";
+>
+> // For wrapping plain ERC-20 → ERC-7984:
+> import {ERC7984ERC20Wrapper} from "@openzeppelin/confidential-contracts/token/ERC7984/extensions/ERC7984ERC20Wrapper.sol";
+>
+> // Receiver hook (ERC-7984 callback target):
+> import {IERC7984Receiver} from "@openzeppelin/confidential-contracts/interfaces/IERC7984Receiver.sol";
+>
+> // Safe encrypted math:
+> import {FHESafeMath} from "@openzeppelin/confidential-contracts/utils/FHESafeMath.sol";
+> ```
+
 ## Overview
 
 ERC-7984 is **Zama's official standard** for confidential fungible tokens on FHEVM. It is the FHE equivalent of ERC-20 — every confidential token on FHEVM should implement this standard.
@@ -201,22 +219,9 @@ If the callback returns `false` (encrypted), the token contract attempts to refu
 
 ## Wrap/Unwrap (ERC-20 ↔ ERC-7984)
 
-Use `ERC7984ERC20Wrapper` extension:
-
-**Override tip**: When extending `ERC7984ERC20Wrapper`, use `override(ERC7984ERC20Wrapper)` — NOT `override(ERC7984, ERC7984ERC20Wrapper)`. The wrapper already overrides the base:
-
-```solidity
-// Required overrides when extending ERC7984ERC20Wrapper:
-function decimals() public view override(ERC7984ERC20Wrapper) returns (uint8) {
-    return ERC7984ERC20Wrapper.decimals();
-}
-function supportsInterface(bytes4 id) public view override(ERC7984ERC20Wrapper) returns (bool) {
-    return ERC7984ERC20Wrapper.supportsInterface(id);
-}
-function _update(address from, address to, euint64 amount) internal override(ERC7984ERC20Wrapper) returns (euint64) {
-    return ERC7984ERC20Wrapper._update(from, to, amount);
-}
-```
+Use the `ERC7984ERC20Wrapper` extension. The wrapper class itself already
+provides full implementations of `decimals()`, `supportsInterface()`, and
+`_update()`, so a thin subclass that adds NOTHING needs **no overrides**:
 
 ```solidity
 import {ERC7984ERC20Wrapper} from "@openzeppelin/confidential-contracts/token/ERC7984/extensions/ERC7984ERC20Wrapper.sol";
@@ -230,10 +235,30 @@ contract WrappedToken is ZamaEthereumConfig, ERC7984ERC20Wrapper, Ownable2Step {
 }
 ```
 
+**Multi-extension override tip:** Only when you stack a *second* extension
+(e.g. `ERC7984ERC20Wrapper, ERC7984Votes`) does Solidity require explicit
+overrides. The signature in that case lists *both* extensions:
+
+```solidity
+function _update(address from, address to, euint64 amount)
+    internal override(ERC7984ERC20Wrapper, ERC7984Votes) returns (euint64)
+{
+    return super._update(from, to, amount);
+}
+```
+
+> **Verified against `@openzeppelin/confidential-contracts@0.4.0`**:
+> `ERC7984ERC20Wrapper.decimals()` is declared `override(IERC7984, ERC7984)`
+> (line 138 of `ERC7984ERC20Wrapper.sol`). A subclass that adds no other
+> extensions inherits the wrapper's `decimals()` directly — no re-override
+> needed.
+
 ### ERC7984ERC20Wrapper Function Signatures
 
 ```solidity
-// Wrap: locks ERC-20, mints encrypted ERC-7984 tokens — returns the minted encrypted amount
+// Wrap: pulls underlying ERC-20 (rounded down to a multiple of rate()),
+//       mints `amount / rate()` confidential tokens to `to`. Returns the
+//       encrypted minted amount (transient ACL granted to msg.sender).
 function wrap(address to, uint256 amount) public virtual returns (euint64);
 // User must first: underlying.approve(wrapperAddress, amount)
 
@@ -244,21 +269,101 @@ function unwrap(address from, address to, externalEuint64 encryptedAmount, bytes
 
 // Finalize: anyone can call after KMS decrypts. Note: requestId is bytes32, NOT uint256.
 function finalizeUnwrap(bytes32 unwrapRequestId, uint64 unwrapAmountCleartext, bytes calldata decryptionProof) public virtual;
-// Verifies proof via checkSignatures, transfers plaintext ERC-20 to recipient
+// Verifies proof via checkSignatures, transfers `unwrapAmountCleartext * rate()` underlying to recipient
 
 // View:
-function underlying() external view returns (address);  // The wrapped ERC-20
+function underlying() external view returns (address);   // The wrapped ERC-20
+function rate()       external view returns (uint256);   // Scaling divisor — see below
+function decimals()   external view returns (uint8);     // = min(underlyingDecimals, 6)
 ```
+
+### ⚠ CRITICAL: `wrap`/`unwrap` Use a Decimal-Scaling `rate()`
+
+`ERC7984` uses `euint64` for balances, which caps at `~1.8 × 10¹⁹`. Most ERC-20
+tokens have 18 decimals → `1` token = `10¹⁸` raw units, far exceeding euint64
+range over realistic supplies. The wrapper handles this by *scaling down*:
+
+```solidity
+// Constructor (paraphrased from ERC7984ERC20Wrapper.sol:35-46):
+uint8 maxDec = _maxDecimals();              // = 6 by default
+uint8 underlyingDec = underlying.decimals();
+if (underlyingDec > maxDec) {
+    _decimals = maxDec;                     // wrapper exposes 6 decimals
+    _rate     = 10**(underlyingDec - maxDec); // e.g. 10**12 for 18-dec USDC
+} else {
+    _decimals = underlyingDec;              // already small enough
+    _rate     = 1;
+}
+```
+
+Consequences for the `wrap()` caller — first table is the **same `amount`
+across different underlyings**, second is the **uint64-overflow boundary**:
+
+| Underlying | Underlying decimals | `rate()` | `wrap(user, 10¹⁸)` mint result |
+|---|---|---|---|
+| 18-dec ERC-20 | 18 | 10¹² | mints `10⁶` confidential units = "1.000000" wrapped |
+| 6-dec ERC-20 (real USDC) | 6 | 1 | mints `10¹⁸` raw — **overflows uint64** (max ~1.844 × 10¹⁹, but 10¹⁸ < that, so **OK at 10¹⁸ specifically**; overflows above ~1.844 × 10¹⁹) |
+| 4-dec ERC-20 | 4 | 1 | mints `10¹⁸` raw — same as 6-dec (rate=1) |
+
+The actual `SafeCast.toUint64` revert threshold is `amount / rate() ≥ 2⁶⁴ ≈
+1.844 × 10¹⁹`. For `rate=1` underlyings (≤6 decimals), the caller must keep
+total `amount` below `2⁶⁴` raw units. For `rate=10¹²` underlyings (18-dec),
+the caller can pass up to `2⁶⁴ × 10¹² ≈ 1.844 × 10³¹` raw units before the
+mint reverts.
+
+The 18-dec case is the most common surprise. Calling `wrap(user, 1_000_000)`
+on a wrapper over an 18-decimal token mints **0** confidential tokens
+(`1_000_000 / 10¹² = 0`), pulls 0 underlying (`amount - amount % rate() = 0`),
+and **leaves the entire 1_000_000 wei in the caller's wallet** (it is never
+pulled — `safeTransferFrom(... , 0)` is a no-op). The user sees a successful
+tx and zero balance change on both sides — the worst kind of silent failure.
+Reading the source once:
+
+```solidity
+// ERC7984ERC20Wrapper.sol:82-91 (confirmed)
+function wrap(address to, uint256 amount) public virtual override returns (euint64) {
+    SafeERC20.safeTransferFrom(IERC20(underlying()), msg.sender, address(this),
+                               amount - (amount % rate()));
+    euint64 wrappedAmountSent = _mint(to, FHE.asEuint64(SafeCast.toUint64(amount / rate())));
+    FHE.allowTransient(wrappedAmountSent, msg.sender);
+    return wrappedAmountSent;
+}
+```
+
+**Frontend rule of thumb:** when prompting the user for an "amount to wrap",
+treat the input as confidential-token units (6 decimals by default) and pass
+`uiAmount * rate()` to `wrap()`. For 1 wrapped USDC over an 18-dec underlying:
+
+```ts
+const rate = await wrapper.rate();          // 10n ** 12n
+const wantConfidential = 1_000_000n;        // 1.000000 wrapped (6-dec)
+await underlying.approve(wrapperAddress, wantConfidential * rate);   // 10**18 wei
+await wrapper.wrap(userAddress, wantConfidential * rate);
+```
+
+`finalizeUnwrap` applies the inverse scaling: `unwrapAmountCleartext * rate()`
+underlying ERC-20 are sent to the recipient (`ERC7984ERC20Wrapper.sol:132`).
 
 ### Wrap: ERC-20 → ERC-7984
 
 ```solidity
-// Step 1: User approves wrapper to spend their ERC-20
-underlying.approve(wrapperAddress, amount);
+uint256 rate = wrapper.rate();           // discover scaling first
+uint256 wantConfidential = 1_000_000;    // 1.000000 in 6-dec wrapped units
+uint256 underlyingAmount = wantConfidential * rate;
 
-// Step 2: Wrap — locks ERC-20, mints encrypted tokens to user
-wrapper.wrap(userAddress, amount);
+// Step 1: User approves wrapper to spend their ERC-20
+underlying.approve(wrapperAddress, underlyingAmount);
+
+// Step 2: Wrap — locks ERC-20, mints `wantConfidential` confidential tokens to user
+wrapper.wrap(userAddress, underlyingAmount);
 ```
+
+> **Single-tx alternative (ERC-1363):** if the underlying token implements
+> `ERC1363`, calling `underlying.transferAndCall(wrapperAddress, amount, data)`
+> hits the wrapper's `onTransferReceived` callback and wraps in one tx — no
+> separate `approve` step. The recipient is decoded from `data` (first 20
+> bytes), defaulting to the original sender. See
+> `ERC7984ERC20Wrapper.sol:54-73`.
 
 ### Unwrap: ERC-7984 → ERC-20 (Async 2-Step)
 
@@ -287,15 +392,62 @@ Step 3: Inside the contract:
   a) euint64 amount = FHE.fromExternal(encAmount, proof)  // Contract gets ACL
   b) FHE.allowTransient(amount, address(token))            // Token can read handle
   c) token.confidentialTransferFrom(user, address(this), amount)  // Pull tokens
+                                                                  // ↑ no-proof overload
+                                                                  //   confidentialTransferFrom(address,address,euint64)
   d) FHE.allowThis(storedAmount)                           // Contract stores handle
   e) FHE.allow(storedAmount, user)                         // User can decrypt
 
-Step 4: Contract pays out later (e.g., batch payroll):
+Step 4: Contract pays out later (e.g., batch payroll, scheduled withdrawal):
   a) FHE.allowTransient(salary, address(token))            // Token can read handle
   b) token.confidentialTransfer(employee, salary)           // Send from contract balance
+                                                            // ↑ no-proof overload
+                                                            //   confidentialTransfer(address,euint64)
 ```
 
 **Key**: Step 1 (setOperator) must happen in a separate transaction BEFORE Step 2. The operator model is time-based — no amount cap.
+
+**Use the no-proof overloads inside the contract.** The 2-arg
+`confidentialTransfer(address,euint64)` and 3-arg
+`confidentialTransferFrom(address,address,euint64)` overloads take an existing
+`euint64` handle — no re-encryption, no `bytes proof` argument. Reaching for
+`externalEuint64` + `proof` from inside a contract is a sign you're doing it
+wrong: a contract cannot produce a fresh user-bound proof. Encrypted inputs
+(and their proofs) only originate from the user's wallet via the Relayer SDK.
+
+### Foot-gun: Plaintext-Priced Pulls (Auctions, Order Books)
+
+When the contract holds the **price as plaintext** (e.g., a fixed reserve
+price, an auction settled at a publicly-revealed clearing price) but pulls the
+**token amount as an `euint64` handle**, the bridge between the two is
+`FHE.asEuint64(plaintextPrice)` followed by `allowTransient`:
+
+```solidity
+// Settlement: winner pays plaintext clearing price, contract pulls ERC-7984
+function settle(address winner, uint64 clearingPrice) external onlyOwner {
+    // ❌ WRONG: passing the plaintext directly to confidentialTransferFrom does not
+    //          compile — the no-proof overload's third arg is euint64, not uint64.
+    // token.confidentialTransferFrom(winner, address(this), clearingPrice);
+
+    // ❌ WRONG: encrypting in storage without allowTransient — token can't read it.
+    // euint64 enc = FHE.asEuint64(clearingPrice);
+    // token.confidentialTransferFrom(winner, address(this), enc);   // silent 0 transfer
+
+    // ✓ CORRECT
+    euint64 enc = FHE.asEuint64(clearingPrice);
+    FHE.allowThis(enc);                            // contract keeps ACL
+    FHE.allowTransient(enc, address(token));       // token reads it for this tx
+    euint64 paid = token.confidentialTransferFrom(winner, address(this), enc);
+    FHE.allowThis(paid);
+}
+```
+
+The same trap appears in any pattern where a known-plaintext amount drives an
+encrypted-token pull: bond redemptions, fixed-fee payouts, slashing penalties.
+The contract owner has the price in clear, but the token only speaks `euint64`.
+
+**Rule of thumb:** if you have a `uint64` and need to call ERC-7984, the
+sequence is always `FHE.asEuint64` → `FHE.allowThis` → `FHE.allowTransient(_, token)`
+→ overload-without-proof.
 
 ## Amount Disclosure
 
