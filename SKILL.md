@@ -668,7 +668,7 @@ For detailed guides, read the corresponding reference file:
 - **[Gas Optimization](references/gas-optimization.md)** — FHE-specific gas patterns, type sizing, batching strategies
 - **[Time-Based Accrual](references/time-based-accrual.md)** — Encrypted interest / rewards / vesting math; the 37%-truncation footgun and the `ACCRUAL_SCALE=1000` pre-multiplier pattern
 - **[Security Checklist](references/security-checklist.md)** — Production security audit checklist for FHEVM contracts
-- **[Zama Upstream](references/zama-upstream.md)** — Pinned versions, upstream repo links, attribution, upgrade procedure when Zama ships breaking changes, **pre-deployed Sepolia confidential token wrappers (cUSDCMock / cWETHMock / cUSDTMock / cZAMAMock / etc.)** for realistic integration tests
+- **[Zama Upstream](references/zama-upstream.md)** — Pinned versions, upstream repo links, attribution, upgrade procedure when Zama ships breaking changes
 - **[Foundry vs Hardhat](references/foundry-vs-hardhat.md)** — Why this skill targets Hardhat, when Foundry is the right call, direct equivalents cheat-sheet for translating patterns to forge-fhevm
 
 ## Templates

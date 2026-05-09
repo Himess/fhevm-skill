@@ -79,63 +79,6 @@ OpenZeppelin sometimes restructures package layouts at major version bumps. If `
 
 **Never paste upstream `main` branch code into this skill's template structure without re-pinning.** Version drift between `@fhevm/solidity` minors has historically broken handle ABI compatibility.
 
----
-
-## Pre-deployed Sepolia confidential tokens (use these for testing)
-
-Zama ships a registry of canonical confidential ERC-7984 wrappers on Sepolia. **Use these instead of deploying your own MockUSDC** when you want a realistic integration test — they're recognised by the explorer, the wrappers registry, and any third-party tooling that integrates with the Zama ecosystem. Source: [docs.zama.org/protocol/protocol-apps/addresses/testnet/sepolia](https://docs.zama.org/protocol/protocol-apps/addresses/testnet/sepolia).
-
-| Token | Symbol | Sepolia address | Underlying decimals |
-|---|---|---|---|
-| Confidential USDC | `cUSDCMock` | `0x7c5BF43B851c1dff1a4feE8dB225b87f2C223639` | 6 |
-| Confidential USDT | `cUSDTMock` | `0x4E7B06D78965594eB5EF5414c357ca21E1554491` | 6 |
-| Confidential WETH | `cWETHMock` | `0x46208622DA27d91db4f0393733C8BA082ed83158` | 18 |
-| Confidential BRON | `cBRONMock` | `0xaa5612FA27c927a0c7961f5AEFEE5ba3A0F9C891` | 18 |
-| Confidential ZAMA | `cZAMAMock` | `0xf2D628d2598aF4eAF94CB76a437Ff86CA78FfbFB` | 18 |
-| Confidential tGBP | `ctGBPMock` | `0xfCE5c7069c5525eF6c8C2b2E35A745bA20a2F7CC` | 6 |
-| Confidential XAUt | `cXAUtMock` | `0xe4FcF848739845BC81Dee1d5352cf3844F0a60C7` | 6 |
-| Wrappers Registry | — | `0x2f0750Bbb0A246059d80e94c454586a7F27a128e` | — |
-
-> **Why use these instead of `templates/mock-erc20.sol` + your own wrapper?**
-> - Already deployed — no extra tx, no extra deploy fee
-> - Match the wrap-rate logic the official wrapper enforces (`_rate = 10**(underlyingDec - 6)`); see `references/erc7984-guide.md` for the rate-scaling pitfall
-> - Recognised by `docs.zama.org`, etherscan integrations, and the Wrappers Registry — easier for anyone reviewing your dApp on-chain
->
-> **Use `templates/mock-erc20.sol` only when:** you need a custom decimal layout, you're testing a wrap/unwrap edge case the official mocks don't expose (e.g. underlying decimals < 6), or you're running locally on Hardhat / forge-fhevm where these addresses don't exist.
-
-### Funding a test wallet with cUSDC / cWETH (the cTokens are NOT directly mintable)
-
-> **Caveat surfaced by stress-test agent (Round 4):** the wrappers above are `Ownable`. `cUSDCMock.mint(yourAddress, ...)` reverts with `OwnableUnauthorizedAccount` because only the Zama deployer holds the owner role. The path that actually works is the standard wrap flow:
-
-```solidity
-// 1. Read the underlying ERC-20 the wrapper points at
-IERC20 underlying = IERC20(IERC7984Wrapper(cUSDCMock).underlying());
-
-// 2. Mint underlying mock tokens (these are open mocks; permissionless mint)
-underlying.mint(myAddress, 1_000_000e6); // 1M USDC, 6 decimals
-
-// 3. Approve the wrapper to pull
-underlying.approve(cUSDCMock, type(uint256).max);
-
-// 4. Wrap → confidential balance lands on `cUSDCMock`
-IERC7984Wrapper(cUSDCMock).wrap(myAddress, 1_000_000e6);
-```
-
-Underlying mock addresses (open `mint()`) come from the Zama wrappers registry at `0x2f0750Bbb0A246059d80e94c454586a7F27a128e`; query `wrapperOf(underlying)` or `underlyingOf(wrapper)` to bridge between the two. From a test script:
-
-```ts
-// Node SDK / ethers v6
-const wrapper = new ethers.Contract(cUSDCMock, ["function underlying() view returns (address)"], wallet);
-const underlyingAddr = await wrapper.underlying();
-const underlying = new ethers.Contract(underlyingAddr, ["function mint(address,uint256)", "function approve(address,uint256)"], wallet);
-await (await underlying.mint(wallet.address, 1_000_000_000_000n)).wait(); // 1M @ 6 dec
-await (await underlying.approve(cUSDCMock, ethers.MaxUint256)).wait();
-const w = new ethers.Contract(cUSDCMock, ["function wrap(address,uint256)"], wallet);
-await (await w.wrap(wallet.address, 1_000_000_000_000n)).wait();
-```
-
-After `wrap()` the cToken balance is encrypted; user-decrypt or `confidentialBalanceOf` (with ACL) to read it.
-
 ## Upgrade procedure (if Zama ships a breaking version)
 
 1. Check the relayer-sdk and `@fhevm/solidity` changelogs for ABI / handle / ACL contract changes
