@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Confidential dApp</title>
+    <style>
+      :root { color-scheme: dark; --bg:#0c0c0c; --fg:#cdd0c4; --accent:#7fbf7f; --warn:#cc9a44; --line:#2a2a2a; }
+      body { background:var(--bg); color:var(--fg); font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; padding: 32px; max-width: 720px; margin: 0 auto; }
+      h1 { font-size: 22px; letter-spacing: 0.04em; }
+      .card { border: 1px solid var(--line); padding: 16px; margin: 16px 0; }
+      .card h3 { margin: 0 0 12px; font-size: 13px; letter-spacing: 0.08em; color: #888; text-transform: uppercase; }
+      button { background: transparent; color: var(--fg); border: 1px solid var(--line); padding: 10px 16px; cursor: pointer; font-family: inherit; font-size: 13px; }
+      button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.primary { background: var(--accent); color: #000; border-color: var(--accent); }
+      .row { display:flex; justify-content:space-between; padding: 6px 0; }
+      input { background: transparent; color: var(--fg); border: 1px solid var(--line); padding: 8px; font-family: inherit; width: 200px; }
+      .log { background:#000; border:1px solid var(--line); padding:8px; height: 180px; overflow-y:auto; font-size: 11px; line-height: 1.5; }
+      .log .ok { color: var(--accent); } .log .warn { color: var(--warn); }
+    </style>
+  </head>
+  <body>
+    <h1>Confidential dApp <span id="status" style="color:#888;font-size:13px">— disconnected</span></h1>
+
+    <div class="card">
+      <h3>Wallet</h3>
+      <div class="row"><span>address</span><span id="addr">—</span></div>
+      <div class="row"><span>network</span><span id="net">—</span></div>
+      <button id="connect" class="primary">Connect MetaMask</button>
+    </div>
+
+    <div class="card" id="actions" hidden>
+      <h3>Encrypted Action</h3>
+      <input id="amount" type="number" placeholder="amount" />
+      <button id="submit" class="primary">Submit (encrypted)</button>
+    </div>
+
+    <div class="card">
+      <h3>Activity</h3>
+      <div id="log" class="log"></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
