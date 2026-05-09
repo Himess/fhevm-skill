@@ -87,17 +87,26 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
         externalEuint64 encAmountA,
         bytes calldata inputProof
     ) external whenNotPaused {
-        euint64 amountA = FHE.fromExternal(encAmountA, inputProof);
+        euint64 requestedA = FHE.fromExternal(encAmountA, inputProof);
 
-        // Calculate fee and net amount
+        // ⚠ DRAIN GUARD: confidentialTransferFrom silently returns 0 on insufficient
+        // balance instead of reverting (Battle Scar #1). We MUST derive the output
+        // leg from the AMOUNT ACTUALLY PULLED IN, not from the requested amount —
+        // otherwise an underfunded caller drains the pool. The return value of
+        // confidentialTransferFrom is the post-deduction transferred handle.
+        FHE.allowTransient(requestedA, address(tokenA));
+        euint64 actualA = tokenA.confidentialTransferFrom(msg.sender, address(this), requestedA);
+        FHE.allowThis(actualA);
+
+        // Now compute fee + output from `actualA`, never `requestedA`.
         euint64 fee;
         euint64 netAmount;
         if (feeDivisor > 0) {
-            fee = FHE.div(amountA, uint64(feeDivisor));
-            netAmount = FHE.sub(amountA, fee);
+            fee = FHE.div(actualA, uint64(feeDivisor));
+            netAmount = FHE.sub(actualA, fee);
         } else {
             fee = FHE.asEuint64(0);
-            netAmount = amountA;
+            netAmount = actualA;
         }
 
         // Calculate output: netAmount * rateNumerator / rateDenominator
@@ -111,11 +120,7 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
             amountB = netAmount;
         }
 
-        // Pull TokenA from user to this contract
-        FHE.allowTransient(amountA, address(tokenA));
-        tokenA.confidentialTransferFrom(msg.sender, address(this), amountA);
-
-        // Send TokenB from this contract to user
+        // Send TokenB from this contract to user (also returns 0 if pool short).
         FHE.allowTransient(amountB, address(tokenB));
         tokenB.confidentialTransfer(msg.sender, amountB);
 
@@ -138,17 +143,21 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
         externalEuint64 encAmountB,
         bytes calldata inputProof
     ) external whenNotPaused {
-        euint64 amountB = FHE.fromExternal(encAmountB, inputProof);
+        euint64 requestedB = FHE.fromExternal(encAmountB, inputProof);
 
-        // Calculate fee and net amount
+        // ⚠ DRAIN GUARD — see swapAtoB() for the full reasoning.
+        FHE.allowTransient(requestedB, address(tokenB));
+        euint64 actualB = tokenB.confidentialTransferFrom(msg.sender, address(this), requestedB);
+        FHE.allowThis(actualB);
+
         euint64 fee;
         euint64 netAmount;
         if (feeDivisor > 0) {
-            fee = FHE.div(amountB, uint64(feeDivisor));
-            netAmount = FHE.sub(amountB, fee);
+            fee = FHE.div(actualB, uint64(feeDivisor));
+            netAmount = FHE.sub(actualB, fee);
         } else {
             fee = FHE.asEuint64(0);
-            netAmount = amountB;
+            netAmount = actualB;
         }
 
         // Calculate output: netAmount * rateDenominator / rateNumerator (inverse)
@@ -161,10 +170,6 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
         } else {
             amountA = netAmount;
         }
-
-        // Pull TokenB from user to this contract
-        FHE.allowTransient(amountB, address(tokenB));
-        tokenB.confidentialTransferFrom(msg.sender, address(this), amountB);
 
         // Send TokenA from this contract to user
         FHE.allowTransient(amountA, address(tokenA));
@@ -208,9 +213,12 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
         FHE.allowTransient(collectedFeesA, address(tokenA));
         tokenA.confidentialTransfer(to, collectedFeesA);
 
-        // Reset fee counter
+        // Reset fee counter — owner needs ACL on the new (zero) handle so
+        // they can decrypt the post-withdraw counter without waiting for the
+        // next swap to re-grant it.
         collectedFeesA = FHE.asEuint64(0);
         FHE.allowThis(collectedFeesA);
+        FHE.allow(collectedFeesA, owner());
 
         emit FeesWithdrawn(address(tokenA), to);
     }
@@ -221,9 +229,10 @@ contract ConfidentialSwap is ZamaEthereumConfig, Ownable2Step {
         FHE.allowTransient(collectedFeesB, address(tokenB));
         tokenB.confidentialTransfer(to, collectedFeesB);
 
-        // Reset fee counter
+        // Reset fee counter — owner ACL re-granted (see withdrawFeesA).
         collectedFeesB = FHE.asEuint64(0);
         FHE.allowThis(collectedFeesB);
+        FHE.allow(collectedFeesB, owner());
 
         emit FeesWithdrawn(address(tokenB), to);
     }
