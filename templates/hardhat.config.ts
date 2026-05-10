@@ -1,6 +1,10 @@
 // IMPORTANT: Requires Hardhat 2 (^2.22.0). Hardhat 3 is NOT compatible with @fhevm/hardhat-plugin.
 // Install: npm install hardhat@^2.22.0
-import { HardhatUserConfig, vars } from "hardhat/config";
+//
+// NODE COMPATIBILITY: Hardhat 2 officially supports Node 18 / 20 / 22.
+// Node 24+ prints `WARNING: You are currently using Node.js vX.X.X, which is
+// not supported` but generally works. Pin via .nvmrc / engines if you can.
+import { HardhatUserConfig } from "hardhat/config";
 import "@fhevm/hardhat-plugin";
 import "@nomicfoundation/hardhat-chai-matchers";
 import "@nomicfoundation/hardhat-ethers";
@@ -15,15 +19,24 @@ import "@typechain/hardhat";
 // then uncomment the import below and the `namedAccounts` block at the bottom.
 // import "hardhat-deploy";
 
-// Option A: Use hardhat vars (recommended):
-//   npx hardhat vars set MNEMONIC
-//   npx hardhat vars set INFURA_API_KEY
-// Option B: Use .env file with dotenv (add to .gitignore!):
+// Use plain `process.env` for both options below — env vars + a default.
+// (We previously used Hardhat's `vars.get(KEY, default)`, but in Hardhat
+// 2.28.x the `default` only kicks in *after* `npx hardhat vars set KEY`
+// has been run at least once on the machine. On a fresh install it throws
+// `TypeError: Cannot read properties of undefined (reading 'KEY')` despite
+// the default. Two stress-test agents hit this on first compile. Plain
+// `process.env.KEY ?? default` is unambiguously fallback-safe.)
+//
+// Option A: shell env vars
+//   export MNEMONIC="..."
+//   export INFURA_API_KEY="..."
+// Option B: .env file (add to .gitignore!) + `dotenv/config` import at the top:
+//   import "dotenv/config";
 //   DEPLOYER_PRIVATE_KEY=0x...
 //   INFURA_API_KEY=...
-const MNEMONIC = vars.get("MNEMONIC", "test test test test test test test test test test test junk");
-const INFURA_API_KEY = vars.get("INFURA_API_KEY", "");
-const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || "";
+const MNEMONIC = process.env.MNEMONIC ?? "test test test test test test test test test test test junk";
+const INFURA_API_KEY = process.env.INFURA_API_KEY ?? "";
+const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY ?? "";
 
 const config: HardhatUserConfig = {
   solidity: {

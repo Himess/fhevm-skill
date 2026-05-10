@@ -376,7 +376,7 @@ await expect(contract.connect(stranger).pause())
     .to.be.revertedWithCustomError(contract, "NotEmployer");
 ```
 
-The wrap fires whenever the SDK has to validate an `externalEuint*` + `inputProof` pair — i.e. any function that calls `FHE.fromExternal(...)` early in its body. Functions guarded by a plaintext check (`onlyOwner`, lifecycle state, etc.) that revert *before* `FHE.fromExternal` are NOT wrapped and Pattern B works on them. The same is true for non-FHE functions like `pause`, `withdraw`, view assertions.
+The wrap is keyed on the **function signature** (any function whose ABI takes `externalEuint*` + `inputProof` parameters), NOT on whether `FHE.fromExternal` was actually reached. Modifier-guarded reverts (`whenNotPaused`, `onlyOwner`) on those functions get wrapped too — empirically confirmed by stress-test agents on `setPaused`-style flows where the modifier reverts before any FHE op runs and chai still couldn't match the custom-error selector. Use Pattern A (try/catch + regex) on every function whose signature has `externalEuint*`. Pattern B is reliable only on functions whose ABI is purely plaintext (no `externalEuint*`): `pause`, `withdraw`, simple admin setters, view assertions.
 
 > **Why this happens:** the hardhat-plugin schedules the proof verification before the EVM call, so when the verification path itself observes a revert it has no way to surface the original custom-error selector. This is a plugin-side limitation, not a Solidity limitation. It's been raised upstream; for now Pattern A is the canonical workaround.
 
