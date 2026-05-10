@@ -91,7 +91,7 @@ Total: **126 / 126** tests passing across nine agents, average self-rated qualit
 ### Skill-internal validation
 
 - Mock-mode tests exercise every template through `@fhevm/hardhat-plugin@0.4.2` (mock coprocessor + real input-proof flow).
-- `scripts/validate-fhevm.sh` lints every contract for the twelve most common FHEVM mistakes — reports zero errors against the shipped templates.
+- `scripts/validate-fhevm.sh` (and the PowerShell port `validate-fhevm.ps1`) lints every contract for the thirteen most common FHEVM mistakes — reports zero errors against the shipped templates.
 - Every Solidity API claim in references is verified against the locally-installed `@fhevm/solidity@0.11.1`, `@openzeppelin/confidential-contracts@0.4.0`, and `@zama-fhe/relayer-sdk@0.4.1` source.
 
 ---
@@ -102,12 +102,12 @@ For the Zama Developer Program S2 (Skills Track), every rubric criterion is mapp
 
 | Criterion | Where |
 |---|---|
-| Accuracy | Source-verified API claims · 9/9 Sepolia E2E proof · 22-row Self-Correction Table |
+| Accuracy | Source-verified API claims · 9/9 Sepolia E2E proof · 28-row Self-Correction Table |
 | Completeness | Contracts + Testing + Deployment + Frontend (foundational + Token-API layers) |
 | Agent effectiveness | 9 fresh agents · 9 distinct dApps · 126/126 tests · 9.0 / 10 average |
 | Code quality | All templates compile, lint clean, run on Sepolia |
 | Structure | `SKILL.md` (entry) → `references/` → `templates/` → `scripts/` |
-| Error prevention | Self-Correction Table · 17 documented pitfalls · 12-rule lint · battle scars |
+| Error prevention | Self-Correction Table · 18 documented pitfalls · 13-rule lint · battle scars |
 
 ---
 
